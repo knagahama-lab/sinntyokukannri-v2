@@ -1,0 +1,19 @@
+<script>
+/* エラー診断: メインスクリプトの前に配置 */
+window._appInitialized = false;
+window.onerror = function(msg, src, line, col, err) {
+  if (window._appInitialized) return false;
+  var html = '<div style="padding:48px;max-width:720px;margin:0 auto;font-family:sans-serif;background:#fff;min-height:100vh;">' +
+    '<h2 style="color:#dc2626;margin-bottom:16px;">&#9888; スクリプトエラー</h2>' +
+    '<p><b>エラー内容:</b> ' + msg + '</p>' +
+    '<p><b>行番号:</b> ' + line + ' / <b>列:</b> ' + col + '</p>' +
+    (err ? '<p><b>詳細:</b> ' + err.message + '</p>' : '') +
+    '<hr style="margin:20px 0;">' +
+    '<p style="color:#666;font-size:13px;">このエラーのスクリーンショットを開発者に共有してください。</p>' +
+    '</div>';
+  document.documentElement.style.background = '#fff';
+  document.body.innerHTML = html;
+  return false;
+};
+console.log('[diag] build=v2-embedded-data location.href=' + location.href);
+</script>

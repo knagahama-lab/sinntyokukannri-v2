@@ -1,19 +1,33 @@
 <script>
-/* エラー診断: メインスクリプトの前に配置 */
+/* エラー診断: メインスクリプトの前に配置
+   ★ v3で判明した重要事項: GASのサンドボックスは "userCodeAppPanel" /
+   "tt" / "Ko" 等の内部コードから、私たちのアプリとは無関係な
+   無害なエラー(postMessage関連のノイズ)を時々発生させる。
+   以前はどんなエラーでも即座に document.body.innerHTML を丸ごと
+   置き換えて画面全体を隠していたため、実際には正常に動いている
+   アプリまで「真っ白/エラー画面」に見えてしまっていた。
+   → 画面を破壊せず、右上に小さい非破壊的なバナーで通知するのみとし、
+   実際のエラー詳細は診断パネル(diag-panel)とconsoleに残す。 */
 window._appInitialized = false;
 window.onerror = function(msg, src, line, col, err) {
-  if (window._appInitialized) return false;
-  var html = '<div style="padding:48px;max-width:720px;margin:0 auto;font-family:sans-serif;background:#fff;min-height:100vh;">' +
-    '<h2 style="color:#dc2626;margin-bottom:16px;">&#9888; スクリプトエラー</h2>' +
-    '<p><b>エラー内容:</b> ' + msg + '</p>' +
-    '<p><b>行番号:</b> ' + line + ' / <b>列:</b> ' + col + '</p>' +
-    (err ? '<p><b>詳細:</b> ' + err.message + '</p>' : '') +
-    '<hr style="margin:20px 0;">' +
-    '<p style="color:#666;font-size:13px;">このエラーのスクリーンショットを開発者に共有してください。</p>' +
-    '</div>';
-  document.documentElement.style.background = '#fff';
-  document.body.innerHTML = html;
+  var isInternal = /userCodeAppPanel|googleusercontent\.com/i.test(src || '');
+  var diagEl = document.getElementById('diag-panel');
+  var text = '⚠ window.onerror: ' + msg + ' (' + (src||'?') + ':' + line + ':' + col + ')' + (isInternal ? ' [GAS内部ノイズの可能性]' : '');
+  console.warn('[diag] ' + text);
+  if (diagEl) {
+    diagEl.style.display = 'block';
+    diagEl.textContent += new Date().toISOString().slice(11, 19) + ' ' + text + '\n';
+  }
+  if (isInternal) return false; // GAS内部の無害なノイズは画面に影響させない
+  // 自前コードの本物のエラーは、画面を破壊せず右上に控えめなバナーで通知する
+  if (!document.getElementById('_err-banner')) {
+    var banner = document.createElement('div');
+    banner.id = '_err-banner';
+    banner.style.cssText = 'position:fixed;top:8px;right:8px;z-index:100000;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:8px 14px;border-radius:8px;font-size:12px;max-width:360px;box-shadow:0 4px 12px rgba(0,0,0,.15);font-family:sans-serif;';
+    banner.innerHTML = '⚠ スクリプトエラーが発生しました(詳細は画面下部の診断パネル参照)<br><button style="margin-top:4px;font-size:11px;" onclick="this.parentElement.remove()">閉じる</button>';
+    document.body.appendChild(banner);
+  }
   return false;
 };
-console.log('[diag] build=v3-checksum location.href=' + location.href);
+console.log('[diag] build=v3-nondestructive-error location.href=' + location.href);
 </script>

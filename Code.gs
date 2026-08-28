@@ -13,30 +13,49 @@ function doGet(e) {
     output.setMimeType(ContentService.MimeType.JSON);
     return output;
   }
-  var template = HtmlService.createTemplateFromFile('index');
-  // ★ 初回データはgoogle.script.run(RPC/postMessage経由)で後から取りに
-  // 行くのではなく、ページ生成時にサーバー側でJSONとして直接HTMLへ
-  // 埋め込む。GASのiframeサンドボックスは、postMessage通信基盤が
-  // window の load イベントより前に完成しておらず、スクリプト実行直後の
-  // google.script.run 呼び出しが応答不能になるケースがあるため、
-  // 初回表示に関しては通信そのものを発生させない設計にする。
-  var saved = loadData();
-  // データ中の文字列値に "</script" が含まれていると、埋め込み先の
-  // <script>タグがHTMLパーサーによって途中で終了させられてしまうため
-  // (ブラウザはJS文字列の中身を認識せず、単純にこの文字列を探して
-  // タグを閉じる)、埋め込み前に安全な形にエスケープする。
-  template.initialDataJson = saved
-    ? saved.replace(/<\/script/gi, '<\\/script')
-    : 'null';
-  return template.evaluate()
+  // ★ v3アーキテクチャ: 実測により判明した制約に基づく設計。
+  // ・google.script.run(RPC)自体は280KBのペイロードでも確実に動く
+  //   ことをテストアプリで実証済み。
+  // ・一方、GASが「最初に送るページ本体」に巨大な<script>を直接
+  //   埋め込むと、サンドボックスの初期化(document.write)が
+  //   ランダムな位置で壊れる(何度やっても壊れる場所が変わる=
+  //   コード内容のバグではなく転送そのものの不安定さ)。
+  // → 初回に送るHTMLは小さく保ち(構造+CSSのみ)、本体JS(約280KB、
+  //   4ファイル分)は google.script.run で取得してから動的に
+  //   <script>要素として注入する。
+  // index.html自体は構造+CSSのみで十分小さいため、テンプレート評価
+  // (include('styles')/include('app')の展開)を使っても問題なし
+  // ——実測で確認済みなのは「巨大なJSの直接埋め込み」だけがNGという点。
+  return HtmlService.createTemplateFromFile('index')
+    .evaluate()
     .setTitle('営業進捗管理システム')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 /**
+ * クライアント側の起動処理(appjs4.html末尾)から google.script.run で
+ * 呼び出される。メインJS(appjs1〜4.html、合計約280KB)から<script>
+ * タグを取り除いた生のJSコードと、保存済みデータをまとめて返す。
+ * このRPC呼び出し自体は実測で問題なく動作することを確認済み。
+ */
+function getAppBundle() {
+  var files = ['appjs1', 'appjs2', 'appjs3', 'appjs4'];
+  var code = files.map(function(name) {
+    var raw = HtmlService.createHtmlOutputFromFile(name).getContent();
+    // 各ファイルは HtmlService.createHtmlOutputFromFile() が
+    // 「HTMLとして妥当な内容」を要求するために <script>タグで
+    // 包んであるが、ここではDOM要素へ直接注入する生JSとして
+    // 使うため、外側のタグだけ取り除く。
+    return raw.replace(/^\s*<script>/i, '').replace(/<\/script>\s*$/i, '');
+  }).join('\n');
+  var saved = loadData();
+  return { code: code, data: saved ? JSON.parse(saved) : null };
+}
+
+/**
  * index.html から <?!= include('styles'); ?> のように呼び出し、
- * styles.html(CSS) / app.html(エラー診断スクリプト) / appjs.html(メインJS)
- * を結合してレンダリングするためのヘルパー。
+ * styles.html(CSS) / app.html(エラー診断スクリプト)を結合して
+ * レンダリングするためのヘルパー。
  * （HTML Service はファイル分割時にこの仕組みが必要）
  */
 function include(filename) {

@@ -46,7 +46,7 @@
     <div id="topbar">
       <div>
         <div class="topbar-title" id="topbar-title">ダッシュボード</div>
-        <div class="topbar-sub">遊技機 基板・エコ進捗管理 <span style="color:#dc2626;font-weight:700;">[build:v2-embedded-data]</span></div>
+        <div class="topbar-sub">遊技機 基板・エコ進捗管理 <span style="color:#dc2626;font-weight:700;">[build:v3-dynamic-inject]</span></div>
       </div>
       <div class="topbar-spacer"></div>
       <div class="topbar-actions">
@@ -695,15 +695,52 @@
   </div>
 </div>
 
-<script>
-/* サーバー側で生成した初回データ。google.script.run(RPC通信)を
-   待たずに即座に画面を描画するための埋め込みデータ。 */
-window.INITIAL_DATA_RAW = <?!= initialDataJson ?>;
-</script>
 <?!= include('app'); ?>
-<?!= include('appjs1'); ?>
-<?!= include('appjs2'); ?>
-<?!= include('appjs3'); ?>
-<?!= include('appjs4'); ?>
+<script>
+/* ★ v3ブートストラップ:
+   最初に送るページ自体には巨大なJSを埋め込まない(実測でGASの
+   サンドボックス初期化がランダムな位置で壊れることを確認済み)。
+   代わりに google.script.run(280KBでも確実に動作することを実測
+   済み)でメインJSコードと保存データをまとめて取得し、動的に
+   <script>要素として注入して実行する。 */
+var _diagEl0=document.getElementById('diag-panel');
+function _diag0(msg){
+  console.log('[diag] '+msg);
+  if(_diagEl0){_diagEl0.style.display='block';_diagEl0.textContent+=new Date().toISOString().slice(11,19)+' '+msg+'\n';}
+}
+function _bootLoadApp(){
+  _diag0('起動(v3): getAppBundle() 呼び出し中...');
+  var t0=Date.now();
+  var timeoutId=setTimeout(function(){
+    _diag0('⚠️ 10秒応答なし。ネットワーク状況を確認してください。');
+  },10000);
+  google.script.run
+    .withSuccessHandler(function(bundle){
+      clearTimeout(timeoutId);
+      _diag0('getAppBundle成功 ('+(Date.now()-t0)+'ms, コード'+(bundle.code?bundle.code.length:0)+'文字)');
+      window.INITIAL_DATA_RAW = bundle.data;
+      try{
+        var s=document.createElement('script');
+        s.textContent=bundle.code;
+        document.body.appendChild(s);
+        _diag0('メインJSの注入・実行完了');
+      }catch(e){
+        _diag0('メインJS注入中にエラー: '+e.message);
+        if(_diagEl0)_diagEl0.style.background='#7f1d1d';
+      }
+    })
+    .withFailureHandler(function(err){
+      clearTimeout(timeoutId);
+      _diag0('getAppBundle失敗: '+(err&&err.message));
+      if(_diagEl0)_diagEl0.style.background='#7f1d1d';
+    })
+    .getAppBundle();
+}
+if(document.readyState==='complete'){
+  setTimeout(_bootLoadApp,0);
+}else{
+  window.addEventListener('load',_bootLoadApp);
+}
+</script>
 </body>
 </html>

@@ -46,7 +46,7 @@
     <div id="topbar">
       <div>
         <div class="topbar-title" id="topbar-title">ダッシュボード</div>
-        <div class="topbar-sub">遊技機 基板・エコ進捗管理 <span style="color:#dc2626;font-weight:700;">[build:v3-dynamic-inject]</span></div>
+        <div class="topbar-sub">遊技機 基板・エコ進捗管理 <span style="color:#dc2626;font-weight:700;">[build:v3-checksum]</span></div>
       </div>
       <div class="topbar-spacer"></div>
       <div class="topbar-actions">
@@ -708,8 +708,14 @@ function _diag0(msg){
   console.log('[diag] '+msg);
   if(_diagEl0){_diagEl0.style.display='block';_diagEl0.textContent+=new Date().toISOString().slice(11,19)+' '+msg+'\n';}
 }
-function _bootLoadApp(){
-  _diag0('起動(v3): getAppBundle() 呼び出し中...');
+function _checksumOf(str){
+  var c=0;
+  for(var i=0;i<str.length;i++){c=(c+str.charCodeAt(i)*(i%97+1))%2147483647;}
+  return c;
+}
+function _bootLoadApp(attempt){
+  attempt=attempt||1;
+  _diag0('起動(v3): getAppBundle() 呼び出し中... (試行'+attempt+'回目)');
   var t0=Date.now();
   var timeoutId=setTimeout(function(){
     _diag0('⚠️ 10秒応答なし。ネットワーク状況を確認してください。');
@@ -717,13 +723,26 @@ function _bootLoadApp(){
   google.script.run
     .withSuccessHandler(function(bundle){
       clearTimeout(timeoutId);
-      _diag0('getAppBundle成功 ('+(Date.now()-t0)+'ms, コード'+(bundle.code?bundle.code.length:0)+'文字)');
+      var actualLen=bundle.code?bundle.code.length:0;
+      var actualSum=bundle.code?_checksumOf(bundle.code):0;
+      _diag0('getAppBundle成功 ('+(Date.now()-t0)+'ms) 期待:'+bundle.expectedLength+'文字/checksum='+bundle.expectedChecksum+' 実際:'+actualLen+'文字/checksum='+actualSum);
+      if(actualLen!==bundle.expectedLength||actualSum!==bundle.expectedChecksum){
+        _diag0('❌ 受信データが破損しています(転送中に文字化け/欠落)。');
+        if(_diagEl0)_diagEl0.style.background='#7f1d1d';
+        if(attempt<3){
+          _diag0('再試行します...('+(attempt+1)+'/3)');
+          setTimeout(function(){_bootLoadApp(attempt+1);},1000);
+        }else{
+          _diag0('3回とも破損。通信経路の問題として調査が必要です。');
+        }
+        return;
+      }
       window.INITIAL_DATA_RAW = bundle.data;
       try{
         var s=document.createElement('script');
         s.textContent=bundle.code;
         document.body.appendChild(s);
-        _diag0('メインJSの注入・実行完了');
+        _diag0('メインJSの注入・実行完了(整合性チェックOK)');
       }catch(e){
         _diag0('メインJS注入中にエラー: '+e.message);
         if(_diagEl0)_diagEl0.style.background='#7f1d1d';

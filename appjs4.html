@@ -920,9 +920,10 @@ function importBoardMasterSeed(){
 let detailState={type:null,id:null};
 
 function _detailList(type){
-  return type==='machine'
-    ? [...MACHINES].map(m=>m.id).sort()
-    : Object.keys(state.partsStock).sort();
+  if(type==='machine')return [...MACHINES].map(m=>m.id).sort();
+  if(type==='catalogModel')return Object.keys(state.catalogModels).sort();
+  if(type==='catalogBoard')return Object.keys(state.catalogBoards).sort();
+  return Object.keys(state.partsStock).sort();
 }
 
 function openDetailModal(type,id){
@@ -950,6 +951,12 @@ function _renderDetailModal(){
   if(type==='machine'){
     document.getElementById('detail-modal-title').textContent=`📇 機種図鑑 — ${id}`;
     document.getElementById('detail-modal-body').innerHTML=renderMachineDetailBody(id);
+  }else if(type==='catalogModel'){
+    document.getElementById('detail-modal-title').textContent=`📖 製品図鑑（機種） — ${id}`;
+    document.getElementById('detail-modal-body').innerHTML=renderCatalogModelDetailBody(id);
+  }else if(type==='catalogBoard'){
+    document.getElementById('detail-modal-title').textContent=`📖 製品図鑑（基板） — ${id}`;
+    document.getElementById('detail-modal-body').innerHTML=renderCatalogBoardDetailBody(id);
   }else{
     document.getElementById('detail-modal-title').textContent=`📇 基板図鑑 — ${id}`;
     document.getElementById('detail-modal-body').innerHTML=renderBoardDetailBody(id);
@@ -1154,6 +1161,290 @@ function handleBoardDriveUpload(event,model){
   reader.readAsDataURL(file);
 }
 
+/* ============================================================
+   製品図鑑（機種図鑑・基板図鑑）
+   ※ 学習・ナレッジベース用の図鑑。既存の機種管理/基板管理ページの
+   「📇 図鑑で見る」（進捗・在庫の実務データ）とは別に、製品の特徴・
+   仕様・学習メモをまとめるためのページ。
+   注意: .html内では '/' + '*' の並びを直接書かない
+   （HtmlService.getContent()がJSコメント開始と誤認識し、以降の内容が
+   丸ごと消える既知の不具合があるため。例: accept属性はズラして書く）。
+============================================================ */
+let _catalogTab='model';
+function showCatalogTab(tab){
+  _catalogTab=tab;
+  renderCatalog();
+}
+
+function addCatalogModel(){
+  const code=(prompt('追加する機種コードを入力してください（例: A87）')||'').trim();
+  if(!code)return;
+  if(state.catalogModels[code]){showToast('⚠️ 既に登録済みです');openDetailModal('catalogModel',code);return;}
+  state.catalogModels[code]={name:'',type:'',gameType:'',brand:'',date:'',
+    boards:{m:'',d:'',de:'',e:'',c:'',s:'',r:''},
+    salesUnits:'',summary:'',features:'',studyNote:'',note:'',photoUrl:'',updatedAt:TODAY};
+  addLog(`📖 製品図鑑（機種）登録: ${code}`);
+  saveToGAS(`製品図鑑（機種）登録: ${code}`);
+  openDetailModal('catalogModel',code);
+}
+function deleteCatalogModel(code){
+  if(!confirm(`製品図鑑から機種「${code}」を削除しますか？`))return;
+  delete state.catalogModels[code];
+  addLog(`📖 製品図鑑（機種）削除: ${code}`);
+  saveToGAS();
+  closeDetailModal();
+  renderCatalog();
+}
+function updateCatalogModelField(code,field,sub,value){
+  const m=state.catalogModels[code];if(!m)return;
+  if(sub)m[field][sub]=value; else m[field]=value;
+  m.updatedAt=TODAY;
+  saveToGAS();
+  if(currentPage==='catalog')renderCatalog();
+}
+
+function addCatalogBoard(){
+  const id=(prompt('追加する基板IDを入力してください（例: M2503A）')||'').trim();
+  if(!id)return;
+  if(state.catalogBoards[id]){showToast('⚠️ 既に登録済みです');openDetailModal('catalogBoard',id);return;}
+  state.catalogBoards[id]={name:'',type:'',category:'',brand:'',version:'',status:'',
+    specs:'',mainParts:'',studyPoint:'',relatedModels:'',note:'',photoUrl:'',updatedAt:TODAY};
+  addLog(`📖 製品図鑑（基板）登録: ${id}`);
+  saveToGAS(`製品図鑑（基板）登録: ${id}`);
+  openDetailModal('catalogBoard',id);
+}
+function deleteCatalogBoard(id){
+  if(!confirm(`製品図鑑から基板「${id}」を削除しますか？`))return;
+  delete state.catalogBoards[id];
+  addLog(`📖 製品図鑑（基板）削除: ${id}`);
+  saveToGAS();
+  closeDetailModal();
+  renderCatalog();
+}
+function updateCatalogBoardField(id,field,value){
+  const b=state.catalogBoards[id];if(!b)return;
+  b[field]=value;
+  b.updatedAt=TODAY;
+  saveToGAS();
+  if(currentPage==='catalog')renderCatalog();
+}
+
+function _catalogPhotoBlock(entry,uploadFn){
+  return`
+    <div style="flex-shrink:0;width:160px;">
+      <div style="width:160px;height:160px;border-radius:10px;overflow:hidden;background:#f1f5f9;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;">
+        ${entry.photoUrl?`<img src="${_esc(entry.photoUrl)}" style="width:100%;height:100%;object-fit:cover;">`:`<span style="color:var(--text-muted);font-size:12px;">写真なし</span>`}
+      </div>
+      <label class="btn btn-sm" style="display:block;text-align:center;margin-top:6px;cursor:pointer;">
+        📷 写真を${entry.photoUrl?'変更':'追加'}
+        ${'<input type="file" accept="image/'+'*" style="display:none;" '+uploadFn+'>'}
+      </label>
+    </div>`;
+}
+function _uploadCatalogPhoto(file,onDone){
+  if(file.size>20*1024*1024){showToast('⚠️ ファイルサイズは20MB以下にしてください');return;}
+  showToast('📤 写真をアップロード中...');
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    const base64=ev.target.result.split(',')[1];
+    if(typeof google!=='undefined'&&google.script){
+      google.script.run
+        .withSuccessHandler(res=>{
+          try{
+            const r=JSON.parse(res);
+            if(r.success){onDone(r.url);showToast('✅ 写真を更新しました');}
+            else showToast('⚠️ '+r.error);
+          }catch(e){showToast('⚠️ レスポンスエラー');}
+        })
+        .withFailureHandler(err=>showToast('⚠️ '+err.message))
+        .uploadFileToDrive(file.name,base64,file.type||'image/jpeg','catalog');
+    }else{showToast('⚠️ GAS環境でのみアップロード可能です');}
+  };
+  reader.readAsDataURL(file);
+}
+function handleCatalogModelPhotoUpload(event,code){
+  const file=event.target.files[0];if(!file)return;
+  event.target.value='';
+  _uploadCatalogPhoto(file,url=>{
+    updateCatalogModelField(code,'photoUrl',null,url);
+    if(detailState.type==='catalogModel'&&detailState.id===code)_renderDetailModal();
+  });
+}
+function handleCatalogBoardPhotoUpload(event,id){
+  const file=event.target.files[0];if(!file)return;
+  event.target.value='';
+  _uploadCatalogPhoto(file,url=>{
+    updateCatalogBoardField(id,'photoUrl',url);
+    if(detailState.type==='catalogBoard'&&detailState.id===id)_renderDetailModal();
+  });
+}
+
+const CATALOG_BOARD_TYPE_LABELS={m:'M（主制御）',d:'D（液晶制御）',de:'DE（液晶IF）',e:'E（演出）',c:'C（払出制御）',s:'S（サブ制御）',r:'R（その他）'};
+
+function renderCatalogModelDetailBody(code){
+  const m=state.catalogModels[code];
+  if(!m)return`<div style="color:var(--text-muted);">機種が見つかりません</div>`;
+  const boardRows=Object.keys(CATALOG_BOARD_TYPE_LABELS).map(k=>`
+    <div>
+      <label style="font-size:10px;color:var(--text-muted);">${CATALOG_BOARD_TYPE_LABELS[k]}</label>
+      <input value="${_esc(m.boards[k])}" onchange="updateCatalogModelField('${code}','boards','${k}',this.value)"
+        style="width:100%;padding:5px 6px;border:1px solid var(--border);border-radius:5px;font-size:11.5px;">
+    </div>`).join('');
+  return`
+    <div style="display:flex;gap:20px;flex-wrap:wrap;">
+      ${_catalogPhotoBlock(m,`onchange="handleCatalogModelPhotoUpload(event,'${code}')"`)}
+      <div style="flex:1;min-width:260px;">
+        <div style="font-size:20px;font-weight:700;margin-bottom:8px;">${_esc(code)}</div>
+        <div class="form-row">
+          <div class="form-field"><label>機種名</label><input value="${_esc(m.name)}" onchange="updateCatalogModelField('${code}','name',null,this.value)"></div>
+          <div class="form-field"><label>ブランド</label><input value="${_esc(m.brand)}" onchange="updateCatalogModelField('${code}','brand',null,this.value)"></div>
+        </div>
+        <div class="form-row" style="margin-top:8px;">
+          <div class="form-field">
+            <label>種別</label>
+            <select onchange="updateCatalogModelField('${code}','type',null,this.value)" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;">
+              ${MACHINE_TYPE_OPTIONS.map(o=>`<option value="${o}"${m.type===o?' selected':''}>${o||'（未設定）'}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-field"><label>発売日</label><input type="date" value="${m.date||''}" onchange="updateCatalogModelField('${code}','date',null,this.value)"></div>
+        </div>
+        <div class="form-row" style="margin-top:8px;">
+          <div class="form-field"><label>売上台数</label><input value="${_esc(m.salesUnits)}" onchange="updateCatalogModelField('${code}','salesUnits',null,this.value)" placeholder="例: 12,000台"></div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
+      <div style="font-size:12px;font-weight:700;margin-bottom:8px;">🧩 基板構成</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;">${boardRows}</div>
+    </div>
+    <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px;">概要</div>
+      <textarea onchange="updateCatalogModelField('${code}','summary',null,this.value)" rows="2"
+        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;">${_esc(m.summary)}</textarea>
+    </div>
+    <div style="margin-top:12px;">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px;">特徴・ポイント</div>
+      <textarea onchange="updateCatalogModelField('${code}','features',null,this.value)" rows="3"
+        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;">${_esc(m.features)}</textarea>
+    </div>
+    <div style="margin-top:12px;">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px;">📚 学習メモ</div>
+      <textarea onchange="updateCatalogModelField('${code}','studyNote',null,this.value)" rows="3"
+        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;">${_esc(m.studyNote)}</textarea>
+    </div>
+    <div style="margin-top:12px;">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px;">📝 備考</div>
+      <textarea onchange="updateCatalogModelField('${code}','note',null,this.value)" rows="2"
+        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;">${_esc(m.note)}</textarea>
+    </div>
+    <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);text-align:right;">
+      <button class="btn btn-sm" style="color:var(--danger);" onclick="deleteCatalogModel('${code}')">🗑 この機種を図鑑から削除</button>
+    </div>`;
+}
+
+function renderCatalogBoardDetailBody(id){
+  const b=state.catalogBoards[id];
+  if(!b)return`<div style="color:var(--text-muted);">基板が見つかりません</div>`;
+  return`
+    <div style="display:flex;gap:20px;flex-wrap:wrap;">
+      ${_catalogPhotoBlock(b,`onchange="handleCatalogBoardPhotoUpload(event,'${id}')"`)}
+      <div style="flex:1;min-width:260px;">
+        <div style="font-size:20px;font-weight:700;margin-bottom:8px;">${_esc(id)}</div>
+        <div class="form-row">
+          <div class="form-field"><label>基板名</label><input value="${_esc(b.name)}" onchange="updateCatalogBoardField('${id}','name',this.value)"></div>
+          <div class="form-field"><label>ブランド</label><input value="${_esc(b.brand)}" onchange="updateCatalogBoardField('${id}','brand',this.value)"></div>
+        </div>
+        <div class="form-row" style="margin-top:8px;">
+          <div class="form-field">
+            <label>分類</label>
+            <select onchange="updateCatalogBoardField('${id}','category',this.value)" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;">
+              ${BOARD_CATEGORY_DEFS.map(c=>`<option value="${c.key}"${b.category===c.key?' selected':''}>${c.key}_${c.label}</option>`).join('')}
+              <option value=""${!b.category?' selected':''}>（未設定）</option>
+            </select>
+          </div>
+          <div class="form-field"><label>バージョン</label><input value="${_esc(b.version)}" onchange="updateCatalogBoardField('${id}','version',this.value)"></div>
+        </div>
+        <div class="form-row" style="margin-top:8px;">
+          <div class="form-field"><label>ステータス</label><input value="${_esc(b.status)}" onchange="updateCatalogBoardField('${id}','status',this.value)" placeholder="例: 現行 / 廃版 / 開発中"></div>
+          <div class="form-field"><label>関連機種コード</label><input value="${_esc(b.relatedModels)}" onchange="updateCatalogBoardField('${id}','relatedModels',this.value)" placeholder="例: A87, D63"></div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px;">仕様</div>
+      <textarea onchange="updateCatalogBoardField('${id}','specs',this.value)" rows="3"
+        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;">${_esc(b.specs)}</textarea>
+    </div>
+    <div style="margin-top:12px;">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px;">主要部品</div>
+      <textarea onchange="updateCatalogBoardField('${id}','mainParts',this.value)" rows="2"
+        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;">${_esc(b.mainParts)}</textarea>
+    </div>
+    <div style="margin-top:12px;">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px;">📚 学習ポイント</div>
+      <textarea onchange="updateCatalogBoardField('${id}','studyPoint',this.value)" rows="3"
+        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;">${_esc(b.studyPoint)}</textarea>
+    </div>
+    <div style="margin-top:12px;">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px;">📝 備考</div>
+      <textarea onchange="updateCatalogBoardField('${id}','note',this.value)" rows="2"
+        style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;">${_esc(b.note)}</textarea>
+    </div>
+    <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);text-align:right;">
+      <button class="btn btn-sm" style="color:var(--danger);" onclick="deleteCatalogBoard('${id}')">🗑 この基板を図鑑から削除</button>
+    </div>`;
+}
+
+function renderCatalog(){
+  const searchEl=document.getElementById('catalog-search');
+  const term=(searchEl?searchEl.value:'').trim().toLowerCase();
+  const cursorPos=searchEl?searchEl.selectionStart:null;
+  const hadFocus=document.activeElement===searchEl;
+
+  const isModel=_catalogTab==='model';
+  const entries=isModel?state.catalogModels:state.catalogBoards;
+  const codes=Object.keys(entries).filter(code=>{
+    if(!term)return true;
+    const e=entries[code];
+    return _hit(code,term)||_hit(e.name,term)||_hit(e.summary,term)||_hit(e.features||e.specs,term);
+  }).sort();
+
+  const rowsHtml=codes.map(code=>{
+    const e=entries[code];
+    return`<tr style="cursor:pointer;" onclick="openDetailModal('${isModel?'catalogModel':'catalogBoard'}','${code}')">
+      <td>${e.photoUrl?`<img src="${_esc(e.photoUrl)}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;">`:`<span style="color:var(--text-muted);font-size:11px;">—</span>`}</td>
+      <td><strong>${_esc(code)}</strong></td>
+      <td>${_esc(isModel?e.name:e.name)||'—'}</td>
+      <td style="font-size:11px;color:var(--text-sub);">${isModel?_esc(e.type)||'—':_esc(e.category)||'—'}</td>
+      <td style="font-size:11px;color:var(--text-sub);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_esc(isModel?e.summary:e.specs)||'—'}</td>
+      <td style="font-size:10.5px;color:var(--text-muted);">${e.updatedAt||'—'}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('page-catalog').innerHTML=`
+    <div class="page-heading"><div><h2>📖 製品図鑑</h2><p>機種・基板の特徴/仕様/学習メモをまとめるナレッジベース。実務の進捗・在庫データとは別に、社内教育や引き継ぎ用の情報を蓄積します。</p></div></div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <button class="btn btn-sm ${isModel?'btn-primary':''}" onclick="showCatalogTab('model')">🏭 機種図鑑（${Object.keys(state.catalogModels).length}）</button>
+      <button class="btn btn-sm ${!isModel?'btn-primary':''}" onclick="showCatalogTab('board')">🔌 基板図鑑（${Object.keys(state.catalogBoards).length}）</button>
+    </div>
+    <div class="filter-bar">
+      <input id="catalog-search" type="text" placeholder="🔍 コード・名称・概要で検索" value="${_esc(term)}" oninput="renderCatalog()"
+        style="flex:1;min-width:240px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
+      <button class="btn btn-sm btn-primary" onclick="${isModel?'addCatalogModel()':'addCatalogBoard()'}">＋ ${isModel?'機種':'基板'}を登録</button>
+    </div>
+    <div class="table-wrap"><div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;min-width:640px;">
+      <thead><tr><th style="width:52px;"></th><th>コード</th><th>名称</th><th>${isModel?'種別':'分類'}</th><th>${isModel?'概要':'仕様'}</th><th>更新日</th></tr></thead>
+      <tbody>${rowsHtml||`<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px;">登録がありません。「＋ 登録」から追加してください。</td></tr>`}</tbody>
+    </table></div></div>`;
+
+  const newSearchEl=document.getElementById('catalog-search');
+  if(newSearchEl&&hadFocus){
+    newSearchEl.focus();
+    if(cursorPos!=null)newSearchEl.setSelectionRange(cursorPos,cursorPos);
+  }
+}
+
+
 
 /* ============================================================
    値上げインパクト（部品原価改定 → 基板 → 機種別・利益低下）
@@ -1266,6 +1557,7 @@ function renderPage(page){
   else if(page==='parts')renderParts();
   else if(page==='boards')renderBoards();
   else if(page==='priceimpact')renderPriceImpact();
+  else if(page==='catalog')renderCatalog();
 }
 
 /* ============================================================
@@ -1313,6 +1605,8 @@ function _init(saved){
       if(s.machinePhotos)Object.assign(state.machinePhotos,s.machinePhotos);
       if(s.boardPhotos)Object.assign(state.boardPhotos,s.boardPhotos);
       if(s.boardDriveFiles)Object.assign(state.boardDriveFiles,s.boardDriveFiles);
+      if(s.catalogModels)Object.assign(state.catalogModels,s.catalogModels);
+      if(s.catalogBoards)Object.assign(state.catalogBoards,s.catalogBoards);
       if(s.driveFiles)Object.assign(state.driveFiles,s.driveFiles);
       if(s.linkageUrlOverrides)Object.assign(state.linkageUrlOverrides,s.linkageUrlOverrides);
       if(s.config&&s.config.tabSettings)Object.assign(state.config.tabSettings,s.config.tabSettings);

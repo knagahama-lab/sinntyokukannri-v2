@@ -88,6 +88,8 @@ const state = {
   machinePhotos:{},// { machineId: {fileId,url,fileName,uploadedAt} } — 図鑑ビュー用の代表写真（機種）
   boardPhotos:{},  // { 基板品番: {fileId,url,fileName,uploadedAt} } — 図鑑ビュー用の代表写真（基板）
   boardDriveFiles:{}, // { 基板品番: [{fileId,fileName,url,uploadedAt}] } — 基板に添付したPDF/Excel等
+  catalogModels:{}, // { 機種コード: {name,type,brand,gameType,date,boards:{m,d,de,e,c,s,r},summary,features,studyNote,salesUnits,note,photoUrl,updatedAt} } — 製品図鑑（機種）
+  catalogBoards:{}, // { 基板ID: {name,type,category,brand,version,status,specs,mainParts,studyPoint,relatedModels,note,photoUrl,updatedAt} } — 製品図鑑（基板）
 };
 
 const BOARD_TYPE_DEFS=[
@@ -178,6 +180,8 @@ function saveToGAS(alertDesc){
       machinePhotos:state.machinePhotos,
       boardPhotos:state.boardPhotos,
       boardDriveFiles:state.boardDriveFiles,
+      catalogModels:state.catalogModels,
+      catalogBoards:state.catalogBoards,
     });
     google.script.run.saveData(json);
     if(alertDesc && state.config.notifyEmail){

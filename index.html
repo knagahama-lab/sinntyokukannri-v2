@@ -715,8 +715,27 @@ function _checksumOf(str){
   for(var i=0;i<str.length;i++){c=(c+str.charCodeAt(i)*(i%97+1))%2147483647;}
   return c;
 }
-function _bootLoadApp(attempt){
-  attempt=attempt||1;
+var _bootAttempt=0;
+var _bootSucceeded=false;
+// injectされたJSのパースエラー(GAS内部のランダムなサンドボックス破損)を
+// 検知したら、注入前の状態に戻して自動的に再試行する。
+window.addEventListener('error', function(ev){
+  if(_bootSucceeded)return; // 起動完了後のエラーはapp.html側のonerrorに任せる
+  var isInternal = /userCodeAppPanel|googleusercontent\.com/i.test((ev && ev.filename) || '');
+  if(!isInternal)return; // 自前コードの構文エラーではない
+  _diag0('⚠️ 起動中にサンドボックスのランダム破損を検知(注入したscriptを除去して再試行): '+ev.message);
+  var injected=document.getElementById('_injected-app-script');
+  if(injected)injected.remove();
+  if(_bootAttempt<3){
+    setTimeout(function(){_bootLoadApp();},500);
+  }else{
+    _diag0('3回とも失敗。ページを再読み込みしてください。');
+    if(_diagEl0)_diagEl0.style.background='#7f1d1d';
+  }
+});
+function _bootLoadApp(){
+  _bootAttempt++;
+  var attempt=_bootAttempt;
   _diag0('起動(v3): getAppBundle() 呼び出し中... (試行'+attempt+'回目)');
   var t0=Date.now();
   var timeoutId=setTimeout(function(){
@@ -733,7 +752,7 @@ function _bootLoadApp(attempt){
         if(_diagEl0)_diagEl0.style.background='#7f1d1d';
         if(attempt<3){
           _diag0('再試行します...('+(attempt+1)+'/3)');
-          setTimeout(function(){_bootLoadApp(attempt+1);},1000);
+          setTimeout(function(){_bootLoadApp();},1000);
         }else{
           _diag0('3回とも破損。通信経路の問題として調査が必要です。');
         }
@@ -742,12 +761,17 @@ function _bootLoadApp(attempt){
       window.INITIAL_DATA_RAW = bundle.data;
       try{
         var s=document.createElement('script');
+        s.id='_injected-app-script';
         s.textContent=bundle.code;
         document.body.appendChild(s);
+        _bootSucceeded=true;
         _diag0('メインJSの注入・実行完了(整合性チェックOK)');
       }catch(e){
         _diag0('メインJS注入中にエラー: '+e.message);
         if(_diagEl0)_diagEl0.style.background='#7f1d1d';
+        if(attempt<3){
+          setTimeout(function(){_bootLoadApp();},500);
+        }
       }
     })
     .withFailureHandler(function(err){
@@ -760,7 +784,7 @@ function _bootLoadApp(attempt){
 if(document.readyState==='complete'){
   setTimeout(_bootLoadApp,0);
 }else{
-  window.addEventListener('load',_bootLoadApp);
+  window.addEventListener('load',function(){_bootLoadApp();});
 }
 </script>
 </body>

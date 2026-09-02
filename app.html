@@ -15,7 +15,6 @@ window.onerror = function(msg, src, line, col, err) {
   var text = '⚠ window.onerror: ' + msg + ' (' + (src||'?') + ':' + line + ':' + col + ')' + (isInternal ? ' [GAS内部ノイズの可能性]' : '');
   console.warn('[diag] ' + text);
   if (diagEl) {
-    diagEl.style.display = 'block';
     diagEl.textContent += new Date().toISOString().slice(11, 19) + ' ' + text + '\n';
   }
   if (isInternal) return false; // GAS内部の無害なノイズは画面に影響させない

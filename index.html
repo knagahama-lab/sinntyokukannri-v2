@@ -708,7 +708,7 @@
 var _diagEl0=document.getElementById('diag-panel');
 function _diag0(msg){
   console.log('[diag] '+msg);
-  if(_diagEl0){_diagEl0.style.display='block';_diagEl0.textContent+=new Date().toISOString().slice(11,19)+' '+msg+'\n';}
+  if(_diagEl0){_diagEl0.textContent+=new Date().toISOString().slice(11,19)+' '+msg+'\n';}
 }
 function _checksumOf(str){
   var c=0;

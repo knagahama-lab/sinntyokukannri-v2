@@ -760,7 +760,33 @@ function _bootLoadApp(){
         }
         return;
       }
-      window.INITIAL_DATA_RAW = bundle.data;
+      // 保存データはコードと同じ応答に載せると、データ量が大きい環境
+      // (本番の実データ)で応答が肥大化し起動が失敗したため、別RPCで取得する。
+      // 取得に失敗した場合は空データで起動しない(空stateの保存で実データを
+      // 上書きしてしまうため)。
+      _diag0('保存データ取得中(loadData)...');
+      google.script.run
+        .withSuccessHandler(function(saved){
+          _diag0('loadData成功 ('+(saved?saved.length:0)+'文字)');
+          window.INITIAL_DATA_RAW = saved || null;
+          _bootInject(bundle, attempt);
+        })
+        .withFailureHandler(function(err){
+          _diag0('loadData失敗: '+(err&&err.message));
+          if(_diagEl0){_diagEl0.style.display='block';_diagEl0.style.background='#7f1d1d';}
+          if(attempt<3){setTimeout(function(){_bootLoadApp();},1000);}
+        })
+        .loadData();
+    })
+    .withFailureHandler(function(err){
+      clearTimeout(timeoutId);
+      _diag0('getAppBundle失敗: '+(err&&err.message));
+      if(_diagEl0){_diagEl0.style.display='block';_diagEl0.style.background='#7f1d1d';}
+      if(attempt<3){setTimeout(function(){_bootLoadApp();},1000);}
+    })
+    .getAppBundle();
+}
+function _bootInject(bundle, attempt){
       try{
         var s=document.createElement('script');
         s.id='_injected-app-script';
@@ -775,13 +801,6 @@ function _bootLoadApp(){
           setTimeout(function(){_bootLoadApp();},500);
         }
       }
-    })
-    .withFailureHandler(function(err){
-      clearTimeout(timeoutId);
-      _diag0('getAppBundle失敗: '+(err&&err.message));
-      if(_diagEl0)_diagEl0.style.background='#7f1d1d';
-    })
-    .getAppBundle();
 }
 if(document.readyState==='complete'){
   setTimeout(_bootLoadApp,0);

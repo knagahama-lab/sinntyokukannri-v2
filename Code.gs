@@ -95,7 +95,9 @@ function getAppBundle() {
     // 使うため、外側のタグだけ取り除く。
     return raw.replace(/^\s*<script>/i, '').replace(/<\/script>\s*$/i, '');
   }).join('\n');
-  var saved = loadData();
+  // 保存データはここに含めない（クライアントが loadData() で別途取得）。
+  // 実データの多い本番環境で、コード＋データを1回の応答に載せると
+  // 起動が失敗し画面が空白になったため（2026-09-29）。
   // 受信側で「サーバーが送った文字数」と「実際に届いた文字数」を
   // 比較できるよう、簡易チェックサム(文字数の合計コード値の下32bit)
   // も一緒に返す。転送中の破損を切り分けるための診断用。
@@ -103,7 +105,7 @@ function getAppBundle() {
   for (var i = 0; i < code.length; i++) {
     checksum = (checksum + code.charCodeAt(i) * (i % 97 + 1)) % 2147483647;
   }
-  return { code: code, data: saved ? JSON.parse(saved) : null,
+  return { code: code, data: null,
            expectedLength: code.length, expectedChecksum: checksum };
 }
 

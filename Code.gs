@@ -7,6 +7,32 @@
    WEB APP
 ============================================================ */
 function doGet(e) {
+  if (e && e.parameter && e.parameter.action === 'diagSheetProbe') {
+    var info = {};
+    try {
+      var props = PropertiesService.getScriptProperties();
+      info.orderSync_spreadsheetId = props.getProperty('orderSync_spreadsheetId');
+      info.orderSync_sheetName = props.getProperty('orderSync_sheetName');
+      var sid = e.parameter.id || info.orderSync_spreadsheetId;
+      info.probedId = sid;
+      if (sid) {
+        var ss = SpreadsheetApp.openById(sid);
+        info.ssName = ss.getName();
+        info.sheets = ss.getSheets().map(function(sh) {
+          var lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
+          var headers = lastRow > 0 ? sh.getRange(1, 1, 1, Math.min(lastCol, 20)).getValues()[0] : [];
+          return { name: sh.getName(), rows: lastRow, cols: lastCol, headers: headers };
+        });
+      }
+      var activeTriggers = ScriptApp.getProjectTriggers().map(function(t){ return t.getHandlerFunction(); });
+      info.activeTriggers = activeTriggers;
+    } catch (err) {
+      info.error = err.message;
+    }
+    var outp = ContentService.createTextOutput(JSON.stringify(info, null, 2));
+    outp.setMimeType(ContentService.MimeType.JSON);
+    return outp;
+  }
   if (e && e.parameter && e.parameter.action === 'getForLink') {
     var data = loadData();
     var output = ContentService.createTextOutput(data || '{}');
@@ -498,6 +524,52 @@ function _fmtCellDate(v) {
   }
   var s = String(v).trim();
   return /^\d{4}[-\/]\d{1,2}[-\/]\d{1,2}/.test(s) ? s.substring(0,10).replace(/\//g,'-') : '';
+}
+
+/* ============================================================
+   取込資料アーカイブ（お客様資料PDF・Excelの原本をDriveへ保存）
+   生産計画PDF・ハードウェア構成一覧表などを取り込む際に、原本を
+   「営業進捗管理_取込資料/<種別>」フォルダへ自動保存する。
+   ※ CONFIDENTIAL資料を含むため、uploadFileToDrive() と違い
+     「リンクを知っている全員」への共有設定は行わない（フォルダ権限を継承）。
+============================================================ */
+function archiveImportFile(fileName, base64Data, mimeType, category) {
+  try {
+    var ROOT_NAME = '営業進捗管理_取込資料';
+    var roots = DriveApp.getFoldersByName(ROOT_NAME);
+    var rootFolder = roots.hasNext() ? roots.next() : DriveApp.createFolder(ROOT_NAME);
+
+    var catName = String(category || 'その他お客様資料').replace(/[\\\/:?"<>|]/g, '_');
+    var cats = rootFolder.getFoldersByName(catName);
+    var catFolder = cats.hasNext() ? cats.next() : rootFolder.createFolder(catName);
+
+    var bytes = Utilities.base64Decode(base64Data);
+
+    // 同名・同サイズのファイルが既にあれば二重保存せず既存を返す
+    var same = catFolder.getFilesByName(fileName);
+    while (same.hasNext()) {
+      var f = same.next();
+      if (!f.isTrashed() && f.getSize() === bytes.length) {
+        return JSON.stringify({
+          success: true, duplicate: true,
+          fileId: f.getId(), fileName: fileName, url: f.getUrl(),
+          folderUrl: catFolder.getUrl(),
+          uploadedAt: Utilities.formatDate(f.getDateCreated(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
+        });
+      }
+    }
+
+    var blob = Utilities.newBlob(bytes, mimeType || 'application/octet-stream', fileName);
+    var file = catFolder.createFile(blob);
+    return JSON.stringify({
+      success: true, duplicate: false,
+      fileId: file.getId(), fileName: fileName, url: file.getUrl(),
+      folderUrl: catFolder.getUrl(),
+      uploadedAt: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
+    });
+  } catch (e) {
+    return JSON.stringify({ success: false, error: e.message });
+  }
 }
 
 function deleteFileFromDrive(fileId) {

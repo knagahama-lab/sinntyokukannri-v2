@@ -76,6 +76,7 @@ const HW_LABEL_CANDIDATES={
 function handleHardwareExcelImport(e){
   const file=e.target.files[0];if(!file)return;
   e.target.value='';
+  _archiveImportFile(file,null,'HW構成一覧表取込');
   _loadXLSX(function(){
     const reader=new FileReader();
     reader.onload=ev=>{
@@ -191,12 +192,116 @@ function importHardwareSpecSample(){
 }
 
 /* ============================================================
+   取込資料アーカイブ（お客様資料の原本をDriveへ自動保存）
+   各取込処理（生産計画PDF・HW構成一覧表・生産計画表Excel）から
+   _archiveImportFile(file) を呼ぶと、取込とは独立して原本を
+   Drive「営業進捗管理_取込資料/<種別>」へ保存し一覧に記録する。
+============================================================ */
+const IMPORT_ARCHIVE_CATEGORIES=['生産計画','HW構成一覧表_ぱちんこ','HW構成一覧表_回胴','その他お客様資料'];
+
+function _guessArchiveCategory(fileName){
+  const n=String(fileName||'');
+  if(/生産計画/.test(n))return '生産計画';
+  if(/ハードウェア構成/.test(n)&&/回胴|スロ/.test(n))return 'HW構成一覧表_回胴';
+  if(/ハードウェア構成/.test(n))return 'HW構成一覧表_ぱちんこ';
+  return 'その他お客様資料';
+}
+
+// ファイル名の _YYMMDD（例: _260928【SUN】.pdf）から資料日付を推定 → 'YYYY-MM-DD'
+function _guessArchiveDocDate(fileName){
+  const m=String(fileName||'').match(/(?:^|[_\-\s])(\d{2})(\d{2})(\d{2})(?=[^\d]|$)/);
+  if(!m)return '';
+  const mm=+m[2],dd=+m[3];
+  if(mm<1||mm>12||dd<1||dd>31)return '';
+  return `20${m[1]}-${m[2]}-${m[3]}`;
+}
+
+function _archiveImportFile(file,category,source){
+  if(!file)return;
+  if(typeof google==='undefined'||!google.script)return;
+  if(file.size>40*1024*1024){showToast('⚠️ 40MBを超えるためDrive保存をスキップしました');return;}
+  const cat=category||_guessArchiveCategory(file.name);
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    const base64=ev.target.result.split(',')[1];
+    google.script.run
+      .withSuccessHandler(res=>{
+        let r;try{r=JSON.parse(res);}catch(e){showToast('⚠️ Drive保存: レスポンスエラー');return;}
+        if(!r.success){showToast('⚠️ Drive保存失敗: '+r.error);return;}
+        if(!state.importArchive.some(a=>a.fileId===r.fileId)){
+          state.importArchive.unshift({
+            id:'arc_'+Date.now(),category:cat,fileName:r.fileName,fileId:r.fileId,url:r.url,
+            folderUrl:r.folderUrl||'',docDate:_guessArchiveDocDate(r.fileName),
+            uploadedAt:r.uploadedAt,source:source||'',
+          });
+          addLog(`📁 取込資料をDrive保存: ${r.fileName}`);
+          saveToGAS();
+        }
+        showToast(r.duplicate?`📁 保存済みの原本を確認: ${r.fileName}`:`📁 原本をDriveに保存: ${r.fileName}`);
+        const box=document.getElementById('import-archive-list');
+        if(box)box.innerHTML=_renderImportArchiveList();
+      })
+      .withFailureHandler(err=>showToast('⚠️ Drive保存失敗: '+err.message))
+      .archiveImportFile(file.name,base64,file.type||'application/octet-stream',cat);
+  };
+  reader.readAsDataURL(file);
+}
+
+// 管理コンソール「取込資料アーカイブ」から手動で保存（取込は行わない）
+function handleArchiveUpload(event){
+  const files=Array.from(event.target.files||[]);
+  event.target.value='';
+  const sel=document.getElementById('import-archive-category');
+  const forced=sel&&sel.value!=='auto'?sel.value:'';
+  files.forEach(f=>_archiveImportFile(f,forced||_guessArchiveCategory(f.name),'手動保存'));
+}
+
+function removeImportArchiveEntry(id){
+  const a=state.importArchive.find(x=>x.id===id);
+  if(!a)return;
+  if(!confirm(`一覧から「${a.fileName}」を外しますか？\n（Drive上の原本は削除されません）`))return;
+  state.importArchive=state.importArchive.filter(x=>x.id!==id);
+  saveToGAS();
+  addLog(`📁 取込資料を一覧から除外: ${a.fileName}`);
+  const box=document.getElementById('import-archive-list');
+  if(box)box.innerHTML=_renderImportArchiveList();
+}
+
+function _renderImportArchiveList(){
+  const list=state.importArchive||[];
+  if(!list.length)return '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">まだ保存された資料はありません。各取込を実行すると原本が自動でここに記録されます。</div>';
+  const cats=IMPORT_ARCHIVE_CATEGORIES.concat([...new Set(list.map(a=>a.category))].filter(c=>!IMPORT_ARCHIVE_CATEGORIES.includes(c)));
+  return cats.map(cat=>{
+    const rows=list.filter(a=>a.category===cat)
+      .sort((a,b)=>String(b.docDate||b.uploadedAt).localeCompare(String(a.docDate||a.uploadedAt)));
+    if(!rows.length)return '';
+    const folderUrl=rows.find(r=>r.folderUrl)?.folderUrl;
+    return `<div style="margin-bottom:12px;">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px;">${_esc(cat)}（${rows.length}件）
+        ${folderUrl?`<a href="${_esc(folderUrl)}" target="_blank" style="font-weight:400;font-size:11px;margin-left:6px;">📂 フォルダを開く</a>`:''}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:11.5px;">
+        <thead><tr style="background:#f8fafc;">
+          <th style="text-align:left;padding:4px 6px;">資料日付</th><th style="text-align:left;padding:4px 6px;">ファイル</th>
+          <th style="text-align:left;padding:4px 6px;">保存日時</th><th style="text-align:left;padding:4px 6px;">経路</th><th></th></tr></thead>
+        <tbody>${rows.map((r,i)=>`<tr style="border-top:1px solid var(--border-light);">
+          <td style="padding:4px 6px;white-space:nowrap;">${_esc(r.docDate||'—')}${i===0?' <span style="background:#dcfce7;color:#166534;border-radius:4px;padding:0 5px;font-size:10px;">最新</span>':''}</td>
+          <td style="padding:4px 6px;"><a href="${_esc(r.url)}" target="_blank">📄 ${_esc(r.fileName)}</a></td>
+          <td style="padding:4px 6px;white-space:nowrap;">${_esc(r.uploadedAt||'')}</td>
+          <td style="padding:4px 6px;">${_esc(r.source||'')}</td>
+          <td style="padding:4px 6px;text-align:right;"><button class="btn btn-sm" onclick="removeImportArchiveEntry('${_esc(r.id)}')">一覧から外す</button></td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+  }).join('');
+}
+
+/* ============================================================
    生産計画PDF取込（長納期化部品対応用）
 ============================================================ */
 async function handleProdPlanPDF(event){
   const file=event.target.files[0];
   if(!file)return;
   event.target.value='';
+  _archiveImportFile(file,'生産計画','生産計画PDF取込');
   const prev=document.getElementById('prodplan-preview');
   if(prev)prev.innerHTML='<div style="padding:12px;color:var(--text-sub);font-size:12px;">📄 PDF解析中...</div>';
 
@@ -1607,6 +1712,7 @@ function _init(saved){
       if(s.boardDriveFiles)Object.assign(state.boardDriveFiles,s.boardDriveFiles);
       if(s.catalogModels)Object.assign(state.catalogModels,s.catalogModels);
       if(s.catalogBoards)Object.assign(state.catalogBoards,s.catalogBoards);
+      if(Array.isArray(s.importArchive))state.importArchive=s.importArchive;
       if(s.driveFiles)Object.assign(state.driveFiles,s.driveFiles);
       if(s.linkageUrlOverrides)Object.assign(state.linkageUrlOverrides,s.linkageUrlOverrides);
       if(s.config&&s.config.tabSettings)Object.assign(state.config.tabSettings,s.config.tabSettings);

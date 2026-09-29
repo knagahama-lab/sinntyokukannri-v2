@@ -708,6 +708,27 @@ function renderAdmin(){
       </div>
     </div>
 
+    <!-- 取込資料アーカイブ -->
+    <div class="admin-section">
+      <div class="admin-section-head"><h3>📁 取込資料アーカイブ（Drive保存）</h3>
+        <span style="font-size:11px;color:var(--text-muted);">${(state.importArchive||[]).length}件保存済み</span>
+      </div>
+      <div class="admin-section-body">
+        <div style="font-size:12px;color:var(--text-sub);background:#f8fafc;border-radius:8px;padding:10px 12px;margin-bottom:10px;line-height:1.7;">
+          ℹ️ 下の「生産計画表」「ハードウェア構成一覧表」「生産計画PDF」の取込を行うと、選択したファイルの原本がDrive「営業進捗管理_取込資料/種別」フォルダへ自動保存されます（同名・同サイズは重複保存しません）。<br>
+          🔒 CONFIDENTIAL資料を含むため、リンク共有は設定しません（Driveフォルダの権限に従います）。取込対象外のお客様資料もここから保存できます。
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+          <select id="import-archive-category" style="font-size:12px;padding:4px 6px;">
+            <option value="auto">種別: ファイル名から自動判定</option>
+            ${IMPORT_ARCHIVE_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('')}
+          </select>
+          <input type="file" multiple accept=".pdf,.xlsx,.xls" onchange="handleArchiveUpload(event)" style="font-size:12px;">
+        </div>
+        <div id="import-archive-list">${_renderImportArchiveList()}</div>
+      </div>
+    </div>
+
     <!-- Excel取込 -->
     <div class="admin-section">
       <div class="admin-section-head"><h3>📥 サン電子生産計画表 取込</h3></div>

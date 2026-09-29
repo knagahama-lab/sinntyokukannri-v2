@@ -89,6 +89,7 @@ const state = {
   boardPhotos:{},  // { 基板品番: {fileId,url,fileName,uploadedAt} } — 図鑑ビュー用の代表写真（基板）
   boardDriveFiles:{}, // { 基板品番: [{fileId,fileName,url,uploadedAt}] } — 基板に添付したPDF/Excel等
   catalogModels:{}, // { 機種コード: {name,type,brand,gameType,date,boards:{m,d,de,e,c,s,r},summary,features,studyNote,salesUnits,note,photoUrl,updatedAt} } — 製品図鑑（機種）
+  importArchive:[], // [{id,category,fileName,fileId,url,docDate,uploadedAt,source}] — 取込したお客様資料（生産計画PDF・HW構成一覧表等）のDrive原本
   catalogBoards:{}, // { 基板ID: {name,type,category,brand,version,status,specs,mainParts,studyPoint,relatedModels,note,photoUrl,updatedAt} } — 製品図鑑（基板）
 };
 
@@ -182,6 +183,7 @@ function saveToGAS(alertDesc){
       boardDriveFiles:state.boardDriveFiles,
       catalogModels:state.catalogModels,
       catalogBoards:state.catalogBoards,
+      importArchive:state.importArchive,
     });
     google.script.run.saveData(json);
     if(alertDesc && state.config.notifyEmail){
@@ -323,6 +325,7 @@ function _loadXLSX(cb){
 function handleExcelImport(e){
   const file=e.target.files[0];if(!file)return;
   e.target.value='';
+  if(typeof _archiveImportFile==='function')_archiveImportFile(file,'生産計画','生産計画表Excel取込');
   _loadXLSX(function(){
     const reader=new FileReader();
     reader.onload=ev=>{

@@ -13,17 +13,40 @@ function doGet(e) {
       var props = PropertiesService.getScriptProperties();
       info.orderSync_spreadsheetId = props.getProperty('orderSync_spreadsheetId');
       info.orderSync_sheetName = props.getProperty('orderSync_sheetName');
-      var sid = e.parameter.id || info.orderSync_spreadsheetId;
-      info.probedId = sid;
-      if (sid) {
-        var ss = SpreadsheetApp.openById(sid);
-        info.ssName = ss.getName();
-        info.sheets = ss.getSheets().map(function(sh) {
-          var lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
-          var headers = lastRow > 0 ? sh.getRange(1, 1, 1, Math.min(lastCol, 20)).getValues()[0] : [];
-          return { name: sh.getName(), rows: lastRow, cols: lastCol, headers: headers };
+      // ids=ID1,ID2,... で複数シートを一括調査。rows=先頭何行を返すか(既定8, 最大20)
+      var ids = String(e.parameter.ids || e.parameter.id || info.orderSync_spreadsheetId || '')
+        .split(',').map(function(s){ return s.trim(); }).filter(String);
+      // 管理コンソールで設定済みの連携シートIDも併せて調査（IDのみ、データ本体は返さない）
+      try {
+        var cfg = (JSON.parse(loadData() || '{}').config) || {};
+        info.linkedConfig = {
+          linkageSheetId: cfg.linkageSheetId || '', linkageSheetName: cfg.linkageSheetName || '',
+          linkageUrl: cfg.linkageUrl || '',
+          syncSheetId: cfg.syncSheetId || '', syncSheetName: cfg.syncSheetName || '',
+          orderSyncSheetId: cfg.orderSyncSheetId || '', orderSyncSheetName: cfg.orderSyncSheetName || '',
+        };
+        [cfg.linkageSheetId, cfg.syncSheetId, cfg.orderSyncSheetId, info.orderSync_spreadsheetId].forEach(function(x) {
+          x = String(x || '').trim();
+          if (x && ids.indexOf(x) < 0) ids.push(x);
         });
-      }
+      } catch (eCfg) { info.linkedConfigError = eCfg.message; }
+      var nRows = Math.min(parseInt(e.parameter.rows, 10) || 8, 20);
+      info.spreadsheets = ids.map(function(sid) {
+        var r = { id: sid };
+        try {
+          var ss = SpreadsheetApp.openById(sid);
+          r.ssName = ss.getName();
+          r.sheets = ss.getSheets().map(function(sh) {
+            var lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
+            var top = lastRow > 0 && lastCol > 0
+              ? sh.getRange(1, 1, Math.min(lastRow, nRows), Math.min(lastCol, 40)).getDisplayValues()
+                  .map(function(row){ return row.map(function(v){ return String(v).substring(0, 40); }); })
+              : [];
+            return { name: sh.getName(), gid: sh.getSheetId(), rows: lastRow, cols: lastCol, top: top };
+          });
+        } catch (err2) { r.error = err2.message; }
+        return r;
+      });
       var activeTriggers = ScriptApp.getProjectTriggers().map(function(t){ return t.getHandlerFunction(); });
       info.activeTriggers = activeTriggers;
     } catch (err) {

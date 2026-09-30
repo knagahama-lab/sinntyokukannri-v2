@@ -48,7 +48,7 @@
     <div id="topbar">
       <div>
         <div class="topbar-title" id="topbar-title">ダッシュボード</div>
-        <div class="topbar-sub">遊技機 基板・エコ進捗管理 <span style="color:#dc2626;font-weight:700;">[build:v3-nondestructive-error]</span></div>
+        <div class="topbar-sub">遊技機 基板・エコ進捗管理 <span style="color:#dc2626;font-weight:700;">[build:v2-unified-embed]</span></div>
       </div>
       <div class="topbar-spacer"></div>
       <div class="topbar-actions">
@@ -700,113 +700,9 @@
 </div>
 
 <?!= include('app'); ?>
-<script>
-/* ★ v3ブートストラップ:
-   最初に送るページ自体には巨大なJSを埋め込まない(実測でGASの
-   サンドボックス初期化がランダムな位置で壊れることを確認済み)。
-   代わりに google.script.run(280KBでも確実に動作することを実測
-   済み)でメインJSコードと保存データをまとめて取得し、動的に
-   <script>要素として注入して実行する。 */
-var _diagEl0=document.getElementById('diag-panel');
-function _diag0(msg){
-  console.log('[diag] '+msg);
-  if(_diagEl0){_diagEl0.textContent+=new Date().toISOString().slice(11,19)+' '+msg+'\n';}
-}
-function _checksumOf(str){
-  var c=0;
-  for(var i=0;i<str.length;i++){c=(c+str.charCodeAt(i)*(i%97+1))%2147483647;}
-  return c;
-}
-var _bootAttempt=0;
-var _bootSucceeded=false;
-// injectされたJSのパースエラー(GAS内部のランダムなサンドボックス破損)を
-// 検知したら、注入前の状態に戻して自動的に再試行する。
-window.addEventListener('error', function(ev){
-  if(_bootSucceeded)return; // 起動完了後のエラーはapp.html側のonerrorに任せる
-  var isInternal = /userCodeAppPanel|googleusercontent\.com/i.test((ev && ev.filename) || '');
-  if(!isInternal)return; // 自前コードの構文エラーではない
-  _diag0('⚠️ 起動中にサンドボックスのランダム破損を検知(注入したscriptを除去して再試行): '+ev.message);
-  var injected=document.getElementById('_injected-app-script');
-  if(injected)injected.remove();
-  if(_bootAttempt<3){
-    setTimeout(function(){_bootLoadApp();},500);
-  }else{
-    _diag0('3回とも失敗。ページを再読み込みしてください。');
-    if(_diagEl0)_diagEl0.style.background='#7f1d1d';
-  }
-});
-function _bootLoadApp(){
-  _bootAttempt++;
-  var attempt=_bootAttempt;
-  _diag0('起動(v3): getAppBundle() 呼び出し中... (試行'+attempt+'回目)');
-  var t0=Date.now();
-  var timeoutId=setTimeout(function(){
-    _diag0('⚠️ 10秒応答なし。ネットワーク状況を確認してください。');
-  },10000);
-  google.script.run
-    .withSuccessHandler(function(bundle){
-      clearTimeout(timeoutId);
-      var actualLen=bundle.code?bundle.code.length:0;
-      var actualSum=bundle.code?_checksumOf(bundle.code):0;
-      _diag0('getAppBundle成功 ('+(Date.now()-t0)+'ms) 期待:'+bundle.expectedLength+'文字/checksum='+bundle.expectedChecksum+' 実際:'+actualLen+'文字/checksum='+actualSum);
-      if(actualLen!==bundle.expectedLength||actualSum!==bundle.expectedChecksum){
-        _diag0('❌ 受信データが破損しています(転送中に文字化け/欠落)。');
-        if(_diagEl0)_diagEl0.style.background='#7f1d1d';
-        if(attempt<3){
-          _diag0('再試行します...('+(attempt+1)+'/3)');
-          setTimeout(function(){_bootLoadApp();},1000);
-        }else{
-          _diag0('3回とも破損。通信経路の問題として調査が必要です。');
-        }
-        return;
-      }
-      // 保存データはコードと同じ応答に載せると、データ量が大きい環境
-      // (本番の実データ)で応答が肥大化し起動が失敗したため、別RPCで取得する。
-      // 取得に失敗した場合は空データで起動しない(空stateの保存で実データを
-      // 上書きしてしまうため)。
-      _diag0('保存データ取得中(loadData)...');
-      google.script.run
-        .withSuccessHandler(function(saved){
-          _diag0('loadData成功 ('+(saved?saved.length:0)+'文字)');
-          window.INITIAL_DATA_RAW = saved || null;
-          _bootInject(bundle, attempt);
-        })
-        .withFailureHandler(function(err){
-          _diag0('loadData失敗: '+(err&&err.message));
-          if(_diagEl0){_diagEl0.style.display='block';_diagEl0.style.background='#7f1d1d';}
-          if(attempt<3){setTimeout(function(){_bootLoadApp();},1000);}
-        })
-        .loadData();
-    })
-    .withFailureHandler(function(err){
-      clearTimeout(timeoutId);
-      _diag0('getAppBundle失敗: '+(err&&err.message));
-      if(_diagEl0){_diagEl0.style.display='block';_diagEl0.style.background='#7f1d1d';}
-      if(attempt<3){setTimeout(function(){_bootLoadApp();},1000);}
-    })
-    .getAppBundle();
-}
-function _bootInject(bundle, attempt){
-      try{
-        var s=document.createElement('script');
-        s.id='_injected-app-script';
-        s.textContent=bundle.code;
-        document.body.appendChild(s);
-        _bootSucceeded=true;
-        _diag0('メインJSの注入・実行完了(整合性チェックOK)');
-      }catch(e){
-        _diag0('メインJS注入中にエラー: '+e.message);
-        if(_diagEl0)_diagEl0.style.background='#7f1d1d';
-        if(attempt<3){
-          setTimeout(function(){_bootLoadApp();},500);
-        }
-      }
-}
-if(document.readyState==='complete'){
-  setTimeout(_bootLoadApp,0);
-}else{
-  window.addEventListener('load',function(){_bootLoadApp();});
-}
-</script>
+<?!= include('appjs1'); ?>
+<?!= include('appjs2'); ?>
+<?!= include('appjs3'); ?>
+<?!= include('appjs4'); ?>
 </body>
 </html>

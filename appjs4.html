@@ -1731,20 +1731,56 @@ function _init(saved){
     console.log('[diag] '+msg);
     if(_diagEl){_diagEl.textContent+=new Date().toISOString().slice(11,19)+' '+msg+'\n';}
   }
-  // ★ v2アーキテクチャ: 初回データはサーバーがHTML生成時に直接埋め込む
-  // (window.INITIAL_DATA_RAW)。google.script.run(postMessage経由のRPC)
-  // には一切依存しない — サンドボックスの通信基盤の初期化タイミングに
-  // 関係なく、必ずページ表示と同時にデータが揃っている。
-  _diag('起動 (v2: 埋め込みデータ方式、RPC通信なし)');
-  try{
-    var saved=(typeof window.INITIAL_DATA_RAW!=='undefined')?window.INITIAL_DATA_RAW:null;
-    _diag('埋め込みデータ: '+(saved?'あり':'なし(新規状態)'));
-    _init(saved);
-    _diag('_init完了、renderDashboard実行済み');
-  }catch(e){
-    _diag('_init内でエラー: '+e.message);
-    if(_diagEl)_diagEl.style.background='#7f1d1d';
+  // ★ 起動方式: 本番(旧v1 build v9)で実績のある方式に統一。
+  // メインJSはページに直接埋め込み(include)、保存データは window.load 後に
+  // google.script.run.loadData() で取得する。
+  // ※ 旧v1にあった「8秒応答なしなら空データで初期化」は、空stateの保存で
+  //   実データを上書きする危険があるため廃止し、再試行のみ行う。
+  var _initCalled=false;
+  function _safeInit(saved,label){
+    if(_initCalled)return;
+    _initCalled=true;
+    _diag('_init開始 ('+label+')');
+    try{
+      _init(saved);
+      _diag('_init完了、renderDashboard実行済み');
+    }catch(e){
+      _diag('_init内でエラー: '+e.message);
+      if(_diagEl){_diagEl.style.display='block';_diagEl.style.background='#7f1d1d';}
+    }
   }
+  var _loadAttempt=0;
+  function _startLoad(){
+    _loadAttempt++;
+    if(typeof google==='undefined'||!google.script){
+      _diag('google.scriptが存在しません(GAS外での表示)');
+      _safeInit(null,'no-google-script');
+      return;
+    }
+    _diag('loadData() 呼び出し中... (試行'+_loadAttempt+'回目)');
+    var done=false;
+    var timeoutId=setTimeout(function(){
+      if(done||_initCalled)return;
+      _diag('⚠️ 15秒応答なし。再試行します。');
+      if(_loadAttempt<3){_startLoad();}
+      else{
+        _diag('3回とも応答なし。ページを再読み込みしてください。');
+        if(_diagEl){_diagEl.style.display='block';_diagEl.style.background='#7f1d1d';}
+      }
+    },15000);
+    google.script.run
+      .withSuccessHandler(function(saved){done=true;clearTimeout(timeoutId);_diag('loadData成功 ('+(saved?saved.length:0)+'文字)');_safeInit(saved,'success');})
+      .withFailureHandler(function(err){
+        done=true;clearTimeout(timeoutId);
+        _diag('loadData失敗: '+(err&&err.message));
+        if(_loadAttempt<3){setTimeout(_startLoad,1000);}
+        else if(_diagEl){_diagEl.style.display='block';_diagEl.style.background='#7f1d1d';}
+      })
+      .loadData();
+  }
+  // GASのサンドボックスは window.load 時点で postMessage 通信基盤が整うため、load後に呼ぶ
+  if(document.readyState==='complete'){setTimeout(_startLoad,0);}
+  else{window.addEventListener('load',_startLoad);}
 })();
 
 

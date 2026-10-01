@@ -197,8 +197,8 @@ function saveToGAS(alertDesc){
 ============================================================ */
 let currentPage='dashboard';
 const PAGE_TITLES={
-  dashboard:'ダッシュボード',schedule:'スケジュール',
-  eco:'エコフロー管理',flow:'業務フロー',admin:'管理コンソール',log:'更新ログ',
+  dashboard:'機種一覧',schedule:'スケジュール',docs:'資料一覧',
+  eco:'エコフロー管理',flow:'進捗状況（業務フロー）',admin:'管理コンソール',log:'更新ログ',
   parts:'機種管理',boards:'基板管理',
   priceimpact:'値上げインパクト',catalog:'製品図鑑',future:'将来機種計画',
 };
@@ -536,10 +536,10 @@ function setupDailyTrigger(){
    TAB (SIDEBAR) MANAGEMENT
 ============================================================ */
 const TAB_DEFS=[
-  {id:'dashboard',icon:'🏠',defaultLabel:'ダッシュボード',section:'main',required:true},
+  {id:'dashboard',icon:'📋',defaultLabel:'機種一覧',section:'main',required:true},
   {id:'schedule', icon:'📅',defaultLabel:'スケジュール',  section:'main'},
   {id:'eco',      icon:'♻️',defaultLabel:'エコフロー',    section:'main'},
-  {id:'flow',     icon:'🔄',defaultLabel:'業務フロー',    section:'main'},
+  {id:'flow',     icon:'📈',defaultLabel:'進捗状況',    section:'main'},
   {id:'future',   icon:'🔭',defaultLabel:'将来機種計画',  section:'main'},
   {id:'admin',    icon:'⚙️',defaultLabel:'管理コンソール',section:'admin',required:true},
   {id:'log',      icon:'📝',defaultLabel:'更新ログ',      section:'admin'},
@@ -552,9 +552,11 @@ function applyTabSettings(){
     if(!el)return;
     el.style.display=(s[t.id]&&s[t.id].hidden&&!t.required)?'none':'';
     const labelEl=el.querySelector('.nav-item-label');
-    if(labelEl)labelEl.textContent=(s[t.id]&&s[t.id].label)||t.defaultLabel;
+    const LEGACY={dashboard:['ダッシュボード','🏠'],flow:['業務フロー','🔄']}[t.id]||[];
+    const lbl=s[t.id]&&s[t.id].label, ic=s[t.id]&&s[t.id].icon;
+    if(labelEl)labelEl.textContent=(lbl&&lbl!==LEGACY[0]?lbl:'')||t.defaultLabel;
     const iconEl=el.querySelector('.nav-item-icon');
-    if(iconEl)iconEl.textContent=(s[t.id]&&s[t.id].icon)||t.icon;
+    if(iconEl)iconEl.textContent=(ic&&ic!==LEGACY[1]?ic:'')||t.icon;
   });
 }
 

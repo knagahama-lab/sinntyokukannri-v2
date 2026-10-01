@@ -109,7 +109,7 @@ function getPriceImpactData() {
  * 書かない(例: 'image/'+'*' のように分割する)。
  */
 function getAppBundle() {
-  var files = ['appjs1', 'appjs2', 'appjs3', 'appjs4', 'appjs5'];
+  var files = ['appjs1', 'appjs2', 'appjs3', 'appjs4', 'appjs5', 'appjs6'];
   var code = files.map(function(name) {
     var raw = HtmlService.createHtmlOutputFromFile(name).getContent();
     // 各ファイルは HtmlService.createHtmlOutputFromFile() が

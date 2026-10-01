@@ -23,14 +23,15 @@
     </div>
     <div class="sidebar-nav">
       <div class="sidebar-section-label">メインメニュー</div>
-      <div class="nav-item active" data-page="dashboard"><span class="nav-item-icon">🏠</span><span class="nav-item-label">ダッシュボード</span></div>
+      <div class="nav-item active" data-page="dashboard"><span class="nav-item-icon">📋</span><span class="nav-item-label">機種一覧</span></div>
       <div class="nav-item" data-page="schedule"><span class="nav-item-icon">📅</span><span class="nav-item-label">スケジュール</span></div>
-      <div class="nav-item" data-page="parts"><span class="nav-item-icon">🧩</span><span class="nav-item-label">機種管理</span></div>
-      <div class="nav-item" data-page="boards"><span class="nav-item-icon">🔧</span><span class="nav-item-label">基板管理</span></div>
+      <div class="nav-item" data-page="flow"><span class="nav-item-icon">📈</span><span class="nav-item-label">進捗状況</span></div>
+      <div class="nav-item" data-page="docs"><span class="nav-item-icon">📁</span><span class="nav-item-label">資料一覧</span></div>
       <div class="nav-item nav-more-toggle" onclick="toggleNavMore()"><span class="nav-item-icon">📂</span><span class="nav-item-label">その他</span><span id="nav-more-arrow" style="margin-left:auto;font-size:10px;opacity:.7;">▸</span></div>
       <div id="nav-more" style="display:none;padding-left:8px;">
+        <div class="nav-item" data-page="parts"><span class="nav-item-icon">🧩</span><span class="nav-item-label">機種管理</span></div>
+        <div class="nav-item" data-page="boards"><span class="nav-item-icon">🔧</span><span class="nav-item-label">基板管理</span></div>
         <div class="nav-item" data-page="eco"><span class="nav-item-icon">♻️</span><span class="nav-item-label">エコフロー</span><span class="nav-badge-wrap"><span class="nav-badge" id="eco-badge">0</span></span></div>
-        <div class="nav-item" data-page="flow"><span class="nav-item-icon">🔄</span><span class="nav-item-label">業務フロー</span></div>
         <div class="nav-item" data-page="priceimpact"><span class="nav-item-icon">📉</span><span class="nav-item-label">値上げインパクト</span></div>
         <div class="nav-item" data-page="catalog"><span class="nav-item-icon">📖</span><span class="nav-item-label">製品図鑑</span></div>
         <div class="nav-item" data-page="future"><span class="nav-item-icon">🔭</span><span class="nav-item-label">将来機種計画</span><span class="nav-badge-wrap"><span class="nav-badge" id="future-badge" style="background:var(--info);">0</span></span></div>
@@ -49,8 +50,8 @@
   <div id="main">
     <div id="topbar">
       <div>
-        <div class="topbar-title" id="topbar-title">ダッシュボード</div>
-        <div class="topbar-sub">遊技機 基板・エコ進捗管理 <span style="color:#dc2626;font-weight:700;">[build:v2-simple1]</span></div>
+        <div class="topbar-title" id="topbar-title">機種一覧</div>
+        <div class="topbar-sub">遊技機 基板・エコ進捗管理 <span style="color:#dc2626;font-weight:700;">[build:v2-simple2]</span></div>
       </div>
       <div class="topbar-spacer"></div>
       <div class="topbar-actions">
@@ -78,6 +79,7 @@
       <div id="page-boards" class="page"></div>
       <div id="page-priceimpact" class="page"></div>
       <div id="page-catalog" class="page"></div>
+      <div id="page-docs" class="page"></div>
     </div>
   </div>
 </div>
@@ -707,5 +709,6 @@
 <?!= include('appjs3'); ?>
 <?!= include('appjs4'); ?>
 <?!= include('appjs5'); ?>
+<?!= include('appjs6'); ?>
 </body>
 </html>

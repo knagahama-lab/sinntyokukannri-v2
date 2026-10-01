@@ -798,7 +798,8 @@ function renderPriceImpact(){
 }
 
 function renderPage(page){
-  if(page==='dashboard')renderDashboard();
+  if(page==='dashboard')renderHome();
+  else if(page==='docs')renderDocs();
   else if(page==='schedule')renderSchedule();
   else if(page==='eco')renderEco();
   else if(page==='flow')renderFlow();

@@ -1,0 +1,225 @@
+<script>
+/* ============================================================
+   シンプル画面（機種一覧 / 資料一覧 / 外部データ取り込み）
+   メニューを「機種一覧・スケジュール・進捗状況・資料一覧」の4つに
+   まとめた新レイアウト。既存データ(state / MACHINES)をそのまま使う。
+   ※ このファイルにスラッシュ+アスタリスクを文字列で書かないこと
+     （HtmlServiceのコメント誤認識の罠。Code.gs getAppBundle の注記参照）
+============================================================ */
+function _e6(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+const _PROG_STEPS=['sampleImpl','sampleAssy','sampleShip','prodImpl','prodAssy','prodShip'];
+
+// 進行状況(%) = 6工程（見本機 実装/組立/出荷・量産 実装/組立/出荷）のうち
+// 日付を過ぎた工程の割合。日程未入力の工程は未完了扱い。量産終了は100%。
+function _machineProgress(m){
+  if(state.statuses[m.id]==='量産終了')return 100;
+  const sc=state.schedules[m.id]||{};
+  return Math.round(_PROG_STEPS.filter(k=>sc[k]&&isPast(sc[k])).length/_PROG_STEPS.length*100);
+}
+function _machineDue(m){
+  const sc=state.schedules[m.id]||{};
+  return sc.prodShip||(state.milestones[m.id]||{}).goalDate||sc.sampleShip||'';
+}
+// 表示用ステータス: 期限超過 > 納期直前 > 登録ステータス
+function _machineStatus(m,alerts){
+  if(alerts.some(a=>a.machineId===m.id&&a.urgent))return{label:'期限超過',cls:'st-red'};
+  const due=_machineDue(m);
+  if(state.statuses[m.id]!=='量産終了'&&isNear(due))return{label:'納期直前',cls:'st-yellow'};
+  const s=state.statuses[m.id]||'量産前';
+  return{label:s,cls:s==='量産中'?'st-blue':s==='量産終了'?'st-green':'st-gray'};
+}
+function _boardHasDocs(machineId,model){
+  if(_getBoardDriveFiles(model).length)return true;
+  const d=state.boardDocs[machineId];
+  if(d&&BOARD_TYPE_DEFS.some(bt=>d[bt.key]&&d[bt.key].model===model&&(d[bt.key].specUrl||d[bt.key].pcbUrl)))return true;
+  const ps=state.partsStock[model];
+  return !!(ps&&ps.bom&&ps.bom.length);
+}
+function _ring(p){
+  const r=14,c=2*Math.PI*r,col=p>=100?'#16a34a':p>=50?'#2563eb':'#0891b2';
+  return `<div class="ring"><svg width="36" height="36" viewBox="0 0 36 36"><circle cx="18" cy="18" r="${r}" fill="none" stroke="#e2e8f0" stroke-width="4"/>
+    <circle cx="18" cy="18" r="${r}" fill="none" stroke="${col}" stroke-width="4" stroke-linecap="round"
+      stroke-dasharray="${(c*p/100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 18 18)"/></svg><span>${p}%</span></div>`;
+}
+
+/* ---------- 機種一覧（トップ） ---------- */
+// 起動時や各所の更新処理は renderDashboard() を直接呼ぶため、新画面へ差し替える
+// （後から読み込まれるこのファイルの宣言が appjs2 の同名関数を上書きする）
+function renderDashboard(){renderHome();}
+
+// 「今やること」: 期限超過・7日以内の日程・14日以内の期限・生産計画取込
+function _homeTodo(alerts){
+  const t=[];
+  alerts.filter(a=>a.urgent).forEach(a=>t.push({c:'st-red',txt:`🚨 ${a.machineId} ${a.label}（期限超過）`,act:`openEditModal('${_e6(a.machineId)}')`}));
+  MACHINES.forEach(m=>{const sc=state.schedules[m.id]||{};
+    [['sampleShip','見本機出荷'],['prodImpl','量産実装'],['prodAssy','量産組立'],['prodShip','量産出荷']].forEach(([k,l])=>{
+      if(isNear(sc[k])){const d=getDiff(sc[k]);t.push({c:'st-yellow',txt:`⚠️ ${m.id} ${l}（${d===0?'本日':d+'日後'}）`,act:`showPage('schedule')`});}});});
+  alerts.filter(a=>!a.urgent).forEach(a=>t.push({c:'st-yellow',txt:`⏰ ${a.machineId} ${a.label}（あと${a.diff}日）`,act:`openEditModal('${_e6(a.machineId)}')`}));
+  const li=state.config.lastSunDenshiImportAt, ds=li?Math.floor((todayD-new Date(li))/86400000):null;
+  if(!li||ds>35)t.push({c:'st-gray',txt:`📊 生産計画Excelの月次取込（${li?ds+'日経過':'未取込'}）`,act:`openImportModal()`});
+  if(!t.length)return '';
+  return `<div class="todo-strip"><strong style="font-size:12px;margin-right:4px;">今やること</strong>${t.map(x=>`<span class="st ${x.c}" style="cursor:pointer;" onclick="${x.act}">${_e6(x.txt)}</span>`).join('')}</div>`;
+}
+
+let _homeTerm='';
+function renderHome(){
+  const alerts=getMilestoneAlerts();
+  const term=_homeTerm.trim().toLowerCase();
+  const hit=m=>!term||m.id.toLowerCase().includes(term)||(m.boards||[]).some(b=>String(b.model||'').toLowerCase().includes(term))||String(m.person||'').toLowerCase().includes(term);
+  const list=MACHINES.filter(hit);
+
+  const active=MACHINES.filter(m=>state.statuses[m.id]==='量産中').length;
+  const near=MACHINES.filter(m=>state.statuses[m.id]!=='量産終了'&&isNear(_machineDue(m))).length;
+  const poWait=alerts.filter(a=>a.type==='po').length;
+  const doneN=MACHINES.filter(m=>state.statuses[m.id]==='量産終了').length;
+
+  const tree=list.map(m=>{
+    const boards=(m.boards||[]).filter(b=>b.model);
+    return `<details class="tree-node" ${term?'open':''}>
+      <summary><span class="tree-machine" onclick="event.preventDefault();openDetailModal('machine','${_e6(m.id)}')">📁 ${_e6(m.id)}</span></summary>
+      ${boards.map(b=>`<div class="tree-board" onclick="openDetailModal('board','${_e6(b.model)}')" title="${_boardHasDocs(m.id,b.model)?'資料あり':'資料未登録'}">
+        <span>🔲 ${_e6(b.type||'基板')} <span class="tree-model">${_e6(b.model)}</span></span>
+        <span class="dot ${_boardHasDocs(m.id,b.model)?'dot-g':'dot-r'}"></span></div>`).join('')||'<div class="tree-board muted">基板未登録</div>'}
+    </details>`;
+  }).join('')||'<div class="muted" style="padding:10px;">該当なし</div>';
+
+  const rows=list.map(m=>{
+    const st=_machineStatus(m,alerts);
+    const boards=(m.boards||[]).map(b=>b.model).filter(Boolean);
+    const due=_machineDue(m);
+    return `<tr onclick="openDetailModal('machine','${_e6(m.id)}')" style="cursor:pointer;">
+      <td><strong>${_e6(m.id)}</strong><div class="muted" style="font-size:11px;">${_e6(m.person||'')}</div></td>
+      <td style="font-size:12px;">${boards.map(_e6).join(', ')||'<span class="muted">—</span>'}</td>
+      <td><span class="st ${st.cls}">● ${_e6(st.label)}</span></td>
+      <td class="mono" style="font-size:12px;">${due?_e6(due.replace(/-/g,'/')):'<span class="muted">—</span>'}</td>
+      <td>${_ring(_machineProgress(m))}</td>
+      <td onclick="event.stopPropagation()" style="text-align:right;white-space:nowrap;">
+        <button class="btn btn-sm" onclick="openEditModal('${_e6(m.id)}')">編集</button></td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('page-dashboard').innerHTML=`
+  <div class="home-wrap">
+    <aside class="home-tree">
+      <div class="home-tree-head">機種管理</div>
+      <input class="home-search" placeholder="🔍 機種・基板・担当で検索" value="${_e6(_homeTerm)}"
+        oninput="_homeTerm=this.value;renderHome();const el=document.querySelector('.home-search');el.focus();el.setSelectionRange(el.value.length,el.value.length);">
+      <div class="home-tree-body">${tree}</div>
+      <div class="muted" style="font-size:10px;padding:8px 4px;"><span class="dot dot-g"></span> 資料あり　<span class="dot dot-r"></span> 資料未登録</div>
+    </aside>
+    <section class="home-main">
+      ${_homeTodo(alerts)}
+      <div class="kpi-row">
+        <div class="kpi"><div class="kpi-ic" style="background:#2563eb;">⚙️</div><div><div class="kpi-l">稼働中の機種数</div><div class="kpi-v">${active}</div></div></div>
+        <div class="kpi"><div class="kpi-ic" style="background:#0f766e;">📅</div><div><div class="kpi-l">納期直前（7日以内）</div><div class="kpi-v">${near}</div></div></div>
+        <div class="kpi"><div class="kpi-ic" style="background:#b45309;">📄</div><div><div class="kpi-l">注文書 未受領</div><div class="kpi-v">${poWait}</div></div></div>
+        <div class="kpi"><div class="kpi-ic" style="background:#15803d;">✅</div><div><div class="kpi-l">量産終了</div><div class="kpi-v">${doneN}</div></div></div>
+      </div>
+      <div class="table-wrap">
+        <div class="table-toolbar"><h2>機種一覧 <span class="muted" style="font-weight:400;font-size:12px;">${list.length}件</span></h2>
+          <button class="btn btn-sm" onclick="openImportModal()">📥 外部データ取り込み</button></div>
+        <table><thead><tr><th>機種名</th><th>関連基板</th><th>ステータス</th><th>納期</th><th>進行状況</th><th></th></tr></thead>
+        <tbody>${rows||'<tr><td colspan="6" class="muted" style="text-align:center;padding:20px;">該当する機種がありません</td></tr>'}</tbody></table>
+      </div>
+    </section>
+  </div>`;
+}
+
+/* ---------- 資料一覧 ---------- */
+let _docsTerm='', _docsType='';
+function _collectDocs(){
+  const out=[];
+  const add=(name,type,owner,date,url)=>{if(url)out.push({name:name||'(無題)',type,owner:owner||'—',date:date||'',url});};
+  (state.importArchive||[]).forEach(a=>add(a.fileName,'取込資料: '+a.category,'—',a.docDate||String(a.uploadedAt||'').slice(0,10),a.url));
+  Object.keys(state.driveFiles||{}).forEach(mid=>(state.driveFiles[mid]||[]).forEach(f=>add(f.fileName,'機種添付',mid,String(f.uploadedAt||'').slice(0,10),f.url)));
+  Object.keys(state.boardDriveFiles||{}).forEach(md=>(state.boardDriveFiles[md]||[]).forEach(f=>add(f.fileName,'基板添付',md,String(f.uploadedAt||'').slice(0,10),f.url)));
+  Object.keys(state.boardDocs||{}).forEach(mid=>{
+    const d=state.boardDocs[mid]||{};
+    add('組立費見積書','組立費見積書',mid,'',d.assemblyQuoteUrl);
+    BOARD_TYPE_DEFS.forEach(bt=>{const b=d[bt.key];if(!b)return;
+      add(`${bt.label} ${b.model||''} 仕様書`,'仕様書',mid,'',b.specUrl);
+      add(`${bt.label} ${b.model||''} PCB見積`,'PCB見積',mid,'',b.pcbUrl);});
+  });
+  MACHINES.forEach(m=>getEstimatesForMachine(m.id).forEach(e=>{
+    add(`見積書 ${e.quoteNo||''}`.trim(),'見積書',m.id,e.quoteDate,e.url);
+    add(`注文書 ${e.orderNo||''}`.trim(),'注文書',m.id,e.poDate,e.orderUrl);
+  }));
+  return out.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+}
+function renderDocs(){
+  const all=_collectDocs();
+  const types=[...new Set(all.map(d=>d.type))].sort();
+  const t=_docsTerm.trim().toLowerCase();
+  const list=all.filter(d=>(!_docsType||d.type===_docsType)&&(!t||(d.name+' '+d.owner+' '+d.type).toLowerCase().includes(t)));
+  document.getElementById('page-docs').innerHTML=`
+    <div class="table-wrap">
+      <div class="table-toolbar"><h2>資料一覧 <span class="muted" style="font-weight:400;font-size:12px;">${list.length} / ${all.length}件</span></h2>
+        <button class="btn btn-primary btn-sm" onclick="openImportModal()">📥 外部データ取り込み</button></div>
+      <div style="display:flex;gap:8px;padding:0 14px 12px;flex-wrap:wrap;">
+        <input class="home-search" style="flex:1;min-width:220px;margin:0;" placeholder="🔍 資料名・機種・基板で検索" value="${_e6(_docsTerm)}"
+          oninput="_docsTerm=this.value;renderDocs();const el=document.querySelector('#page-docs .home-search');el.focus();el.setSelectionRange(el.value.length,el.value.length);">
+        <select onchange="_docsType=this.value;renderDocs();" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:12px;">
+          <option value="">すべての種別</option>${types.map(x=>`<option value="${_e6(x)}"${x===_docsType?' selected':''}>${_e6(x)}</option>`).join('')}
+        </select>
+      </div>
+      <table><thead><tr><th>資料名</th><th>種別</th><th>機種 / 基板</th><th>日付</th><th></th></tr></thead>
+      <tbody>${list.map(d=>`<tr>
+        <td>📄 ${_e6(d.name)}</td><td style="font-size:12px;">${_e6(d.type)}</td><td style="font-size:12px;">${_e6(d.owner)}</td>
+        <td class="mono" style="font-size:12px;">${_e6(d.date||'—')}</td>
+        <td style="text-align:right;"><a class="btn btn-sm" href="${_e6(d.url)}" target="_blank" rel="noopener">開く</a></td></tr>`).join('')
+        ||'<tr><td colspan="5" class="muted" style="text-align:center;padding:20px;">資料がありません。「外部データ取り込み」から追加できます。</td></tr>'}</tbody></table>
+    </div>`;
+}
+
+/* ---------- 外部データ取り込み（モーダル） ---------- */
+// 既存の取込処理は管理コンソール上のプレビュー領域を使うため、
+// 管理コンソールを開いてから該当のファイル選択を起動する
+function _importVia(inputId){
+  closeImportModal();
+  showPage('admin');
+  const el=document.getElementById(inputId);
+  if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.click();}
+}
+function _importOtherDocs(ev){
+  Array.from(ev.target.files||[]).forEach(f=>_archiveImportFile(f,_guessArchiveCategory(f.name),'外部データ取り込み'));
+  ev.target.value='';
+  setTimeout(()=>{if(document.getElementById('import-modal'))_renderImportHistory();},4000);
+}
+function _renderImportHistory(){
+  const box=document.getElementById('import-history');
+  if(!box)return;
+  const list=(state.importArchive||[]).slice(0,10);
+  box.innerHTML=list.length?`<table><thead><tr><th>ファイル名</th><th>種別</th><th>保存日時</th><th>状態</th></tr></thead><tbody>${list.map(a=>`<tr>
+    <td><a href="${_e6(a.url)}" target="_blank" rel="noopener">${_e6(a.fileName)}</a></td><td style="font-size:12px;">${_e6(a.category)}</td>
+    <td class="mono" style="font-size:12px;">${_e6(a.uploadedAt||'')}</td><td><span class="st st-green">保存済</span></td></tr>`).join('')}</tbody></table>`
+    :'<div class="muted" style="padding:12px;text-align:center;">まだ取込履歴はありません</div>';
+}
+function openImportModal(){
+  closeImportModal();
+  const ov=document.createElement('div');
+  ov.id='import-modal';ov.className='modal-overlay';ov.style.display='flex';
+  ov.onclick=e=>{if(e.target===ov)closeImportModal();};
+  ov.innerHTML=`<div class="modal" style="max-width:760px;width:94%;">
+    <div class="modal-head" style="background:linear-gradient(90deg,#1e3a8a,#0f766e);color:#fff;">
+      <span style="font-weight:700;">📥 外部データ取り込み</span>
+      <button class="btn btn-sm" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.4);" onclick="closeImportModal()">✕</button></div>
+    <div style="padding:16px;">
+      <div class="imp-grid">
+        <div class="imp-card"><div class="imp-t">1. Excelファイル</div><div style="font-size:30px;">📗</div>
+          <button class="btn btn-sm" onclick="_importVia('excel-file-admin')">生産計画表（サン電子）</button>
+          <button class="btn btn-sm" onclick="_importVia('hwspec-file-admin')">ハードウェア構成一覧表</button></div>
+        <div class="imp-card"><div class="imp-t">2. PDFファイル</div><div style="font-size:30px;">📕</div>
+          <button class="btn btn-sm" onclick="_importVia('prodplan-pdf-file')">生産計画PDF（長納期部品）</button>
+          <label class="btn btn-sm" style="cursor:pointer;">見積書・図面・その他資料（保存のみ）
+            <input type="file" multiple accept=".pdf,.xlsx,.xls" style="display:none" onchange="_importOtherDocs(event)"></label></div>
+      </div>
+      <div class="muted" style="font-size:11px;margin:8px 0 14px;">取り込んだ原本はDrive「営業進捗管理_取込資料」に自動保存され、資料一覧に表示されます。</div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px;">インポート履歴</div>
+      <div id="import-history" class="table-wrap" style="margin:0;"></div>
+    </div></div>`;
+  document.body.appendChild(ov);
+  _renderImportHistory();
+}
+function closeImportModal(){const m=document.getElementById('import-modal');if(m)m.remove();}
+</script>

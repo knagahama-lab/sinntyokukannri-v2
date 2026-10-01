@@ -503,49 +503,83 @@ function _csTodo(){
   return t.sort((a,b)=>String(a.s.due).localeCompare(String(b.s.due)));
 }
 
-let _csFilter='open',_csTerm='';
+let _csFilter='open',_csTerm='',_csKind='',_csScope='active';
+function _csRowsData(){
+  return _modelRows(_csScope).map(r=>{
+    const db=r.db||{};
+    const cs=CS_KINDS.map(x=>({x,s:_csState(r.key,x.k)}));
+    return {key:r.key,m:r.m,db,kind:typeof _rowKind==='function'?_rowKind(r):(db.kind||'その他'),title:db.title||'',
+      person:(r.m&&r.m.person)||db.person||'',sales:db.salesDate||(db.longlead||{}).deliveryDate||'',agg:db.aggDate||'',cs,
+      soon:cs.some(c=>c.s.label==='依頼期限超過'||c.s.label==='要依頼'),
+      open:cs.some(c=>!c.s.rec.got&&c.s.label!=='対象外（販売済）'),
+      done:cs.every(c=>c.s.rec.got)};
+  });
+}
 function renderConfigSheets(){
   if(!_mdbLoadStarted)_loadModelDB();
   const rules=_csRules();
   const term=_csTerm.trim().toLowerCase();
-  let rows=_modelRows(_csFilter==='all'?'all':'active').filter(r=>{
-    const db=r.db||{};
-    if(term&&!(r.key+' '+(db.title||'')+' '+(r.m?r.m.person:'')).toLowerCase().includes(term))return false;
-    if(_csFilter==='open')return CS_KINDS.some(x=>{const s=_csState(r.key,x.k);return !s.rec.got&&s.label!=='対象外（販売済）';});
-    if(_csFilter==='soon')return CS_KINDS.some(x=>{const s=_csState(r.key,x.k);return s.label==='依頼期限超過'||s.label==='要依頼';});
-    return true;
+  const all=_csRowsData().filter(d=>(!term||(d.key+' '+d.title+' '+d.person).toLowerCase().includes(term))&&(!_csKind||d.kind===_csKind));
+  const pass=d=>_csFilter==='soon'?d.soon:_csFilter==='open'?d.open:_csFilter==='done'?d.done:true;
+  const kinds=['パチンコ','スロット','その他'];
+  const firstDue=d=>d.cs.map(c=>(c.s.rec.got||c.s.rec.req||c.s.label==='対象外（販売済）')?'9999':(c.s.due||'9998')).sort()[0];
+  const list=all.filter(pass).sort((a,b)=>kinds.indexOf(a.kind)-kinds.indexOf(b.kind)||firstDue(a).localeCompare(firstDue(b))||a.key.localeCompare(b.key));
+  window._csList=list;
+  const fmt=v=>v?_e7(String(v).replace(/-/g,'/')):'<span class="same">—</span>';
+  const COLS=5+CS_KINDS.length*4;
+  let body='',last='';
+  list.forEach(d=>{
+    if(d.kind!==last){last=d.kind;body+=`<tr class="pt-sec"><td colspan="${COLS}">■ ${_e7(d.kind)}（${list.filter(x=>x.kind===d.kind).length}機種）</td></tr>`;}
+    body+=`<tr><td class="name" style="cursor:pointer;" onclick="openModelInfo('${_e7(d.key)}')">${_e7(d.key)}${d.m?'<span class="pt-tag">登録</span>':''}</td>
+      <td class="spec" title="${_e7(d.title)}">${_e7(d.title)||'<span class="same">—</span>'}</td>
+      <td>${_e7(d.person)||'<span class="same">—</span>'}</td>
+      <td class="c">${fmt(d.sales)}</td><td class="c">${fmt(d.agg)}</td>
+      ${d.cs.map(c=>{const on=`onclick="openCsEditor('${_e7(d.key)}','${c.x.k}')"`;
+        return `<td class="c cs" ${on}><span class="st ${c.s.cls}" style="padding:0 6px;">${_e7(c.s.label.replace('（販売済）',''))}</span></td>
+          <td class="c cs pt-cur" ${on}>${fmt(c.s.due)}</td><td class="c cs" ${on}>${fmt(c.s.rec.req)}</td>
+          <td class="c cs" ${on}>${c.s.rec.got?(c.s.rec.url?`<a class="q" href="${_e7(c.s.rec.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${fmt(c.s.rec.got)} 📎</a>`:fmt(c.s.rec.got)):'<span class="same">—</span>'}</td>`;}).join('')}
+    </tr>`;
   });
-  const nextDue=r=>CS_KINDS.map(x=>{const s=_csState(r.key,x.k);return (s.rec.got||s.rec.req)?'9999':(s.due||'9998');}).sort()[0];
-  rows.sort((a,b)=>nextDue(a).localeCompare(nextDue(b)));
-  const cell=(key,x)=>{const s=_csState(key,x.k);
-    return `<td style="cursor:pointer;" onclick="openCsEditor('${_e7(key)}','${x.k}')">
-      <span class="st ${s.cls}">${_e7(s.label)}</span>
-      <div class="muted" style="font-size:10px;margin-top:2px;">${s.rec.got?'取得 '+_e7(s.rec.got):s.rec.req?'依頼 '+_e7(s.rec.req):s.due?'期限 '+_e7(s.due):'—'}${s.rec.url?' 📎':''}</div></td>`;};
+  const cnt=f=>all.filter(f).length;
   const ruleRow=x=>{const r=rules[x.k];const sel=(name,v)=>`<select id="csr-${x.k}-${name}" style="font-size:11px;padding:3px;">${Object.entries(CS_BASES).map(([k,l])=>`<option value="${k}"${k===v?' selected':''}>${l}</option>`).join('')}</select>`;
-    return `<tr><td><strong>${x.label}</strong></td><td>${sel('base',r.base)} の <input id="csr-${x.k}-offset" type="number" value="${r.offset}" style="width:60px;font-size:11px;"> 日</td>
+    return `<tr><td class="name">${x.label}</td><td>${sel('base',r.base)} の <input id="csr-${x.k}-offset" type="number" value="${r.offset}" style="width:60px;font-size:11px;"> 日</td>
       <td>${sel('fb',r.fb)} の <input id="csr-${x.k}-fbOffset" type="number" value="${r.fbOffset}" style="width:60px;font-size:11px;"> 日</td></tr>`;};
   document.getElementById('page-csheets').innerHTML=`
-    <div class="table-wrap" style="margin-bottom:12px;">
-      <div class="table-toolbar"><h2>📑 構成表 依頼・取得管理</h2>
-        <button class="btn btn-sm" onclick="openImportModal()">📥 外部データ取り込み</button></div>
-      <div style="display:flex;gap:8px;padding:0 14px 12px;flex-wrap:wrap;align-items:center;">
-        <input class="home-search" style="flex:1;min-width:200px;margin:0;" placeholder="🔍 機種・タイトル・担当で検索" value="${_e7(_csTerm)}"
-          oninput="_csTerm=this.value;renderConfigSheets();const el=document.querySelector('#page-csheets .home-search');el.focus();el.setSelectionRange(el.value.length,el.value.length);">
-        ${[['soon','要依頼・期限超過'],['open','未取得あり'],['active','進行中すべて'],['all','全機種']].map(([k,l])=>`<button class="btn btn-sm ${_csFilter===k?'btn-primary':''}" onclick="_csFilter='${k}';renderConfigSheets();">${l}</button>`).join('')}
-      </div>
-      <table><thead><tr><th>機種</th><th>タイトル</th><th>販売時期</th>${CS_KINDS.map(x=>`<th>${x.label}</th>`).join('')}</tr></thead>
-      <tbody>${rows.map(r=>{const db=r.db||{};return `<tr>
-        <td><strong style="cursor:pointer;" onclick="openModelInfo('${_e7(r.key)}')">${_e7(r.key)}</strong>${r.m?'':' <span class="muted" style="font-size:10px;">DB</span>'}</td>
-        <td style="font-size:12px;">${_e7(db.title||'')}</td>
-        <td class="mono" style="font-size:12px;">${_e7(db.salesDate||(db.longlead||{}).deliveryDate||'—')}</td>
-        ${CS_KINDS.map(x=>cell(r.key,x)).join('')}</tr>`;}).join('')||'<tr><td colspan="6" class="muted" style="text-align:center;padding:20px;">該当する機種がありません（生産計画Excel等を取り込むと表示されます）</td></tr>'}</tbody></table>
+    <div class="pt-bar">
+      ${_ptChip('⚠️ 要依頼・期限超過',cnt(d=>d.soon),_csFilter==='soon',"_csFilter='soon';renderConfigSheets()")}
+      ${_ptChip('未取得あり',cnt(d=>d.open),_csFilter==='open',"_csFilter='open';renderConfigSheets()")}
+      ${_ptChip('✅ 3種取得済',cnt(d=>d.done),_csFilter==='done',"_csFilter='done';renderConfigSheets()")}
+      ${_ptChip('すべて',all.length,_csFilter==='all',"_csFilter='all';renderConfigSheets()")}
     </div>
-    <details class="dash-fold"><summary style="cursor:pointer;font-size:13px;font-weight:700;padding:10px 14px;background:#fff;border:1px solid var(--border-light);border-radius:10px;">⚙️ 依頼期限の計算ルール</summary>
-      <div class="table-wrap" style="margin-top:8px;"><div style="padding:10px 14px;font-size:11px;color:var(--text-sub);">基準日の「N日」前に依頼する場合はマイナスで入力。基準日が無い機種は「代替」を使います。</div>
-        <table><thead><tr><th>構成表</th><th>基準日</th><th>代替（基準日が無い場合）</th></tr></thead><tbody>${CS_KINDS.map(ruleRow).join('')}</tbody></table>
-        <div style="padding:10px 14px;"><button class="btn btn-primary btn-sm" onclick="saveCsRules()">💾 ルールを保存</button>
-          <button class="btn btn-sm" onclick="state.config.csRules={};saveToGAS();renderConfigSheets();">初期値に戻す</button></div></div>
+    <div class="pt-bar">
+      <input id="cs-q" class="pt-in" style="flex:1;min-width:200px;" placeholder="機種・タイトル・担当で検索..." value="${_e7(_csTerm)}"
+        oninput="clearTimeout(window._cT);window._cT=setTimeout(()=>{_csTerm=this.value;renderConfigSheets();const el=document.getElementById('cs-q');el.focus();el.setSelectionRange(el.value.length,el.value.length);},250)">
+      <select class="pt-in" onchange="_csKind=this.value;renderConfigSheets()">
+        <option value="">パチンコ・スロットすべて</option>${['パチンコ','スロット','その他'].map(k=>`<option${_csKind===k?' selected':''}>${k}</option>`).join('')}</select>
+      <select class="pt-in" onchange="_csScope=this.value;renderConfigSheets()">
+        <option value="active"${_csScope==='active'?' selected':''}>進行中・予定の機種</option><option value="all"${_csScope==='all'?' selected':''}>全機種</option></select>
+      <button class="btn btn-sm" onclick="_ptPrint('構成表 依頼・取得一覧','cs-pt')">🖨 印刷</button>
+      <button class="btn btn-sm" style="color:#16a34a;border-color:#16a34a;" onclick="_csCsv()">📥 CSV</button>
+      <button class="btn btn-sm" onclick="openImportModal()">📥 取り込み</button>
+    </div>
+    <div class="pt-info">${list.length}機種。黄色が依頼期限（生産計画の日付から自動計算）。セルをクリックすると依頼日・取得日・構成表URLを登録できます。販売済みの機種は記録が無ければ「対象外」です。</div>
+    <div class="pt-wrap" id="cs-pt"><table class="pt"><thead>
+      <tr><th rowspan="2">機種</th><th rowspan="2">タイトル</th><th rowspan="2">担当</th><th colspan="2">生産計画</th>
+        ${CS_KINDS.map(x=>`<th colspan="4">${x.label} 構成表</th>`).join('')}</tr>
+      <tr><th>販売時期</th><th>部品集約</th>${CS_KINDS.map(()=>`<th>状態</th><th class="pt-cur">依頼期限</th><th>依頼日</th><th>取得日</th>`).join('')}</tr>
+    </thead><tbody>${body||`<tr><td colspan="${COLS}" class="c same" style="padding:20px;">該当する機種がありません（生産計画Excel等を取り込むと表示されます）</td></tr>`}</tbody></table></div>
+    <details style="margin-top:12px;"><summary style="cursor:pointer;font-size:13px;font-weight:700;padding:8px 12px;background:#fff;border:1px solid var(--border-light);border-radius:8px;">⚙️ 依頼期限の計算ルール</summary>
+      <div class="pt-info" style="margin-top:8px;">基準日の「N日前」に依頼する場合はマイナスで入力。基準日が無い機種は「代替」を使います。</div>
+      <div class="pt-wrap" style="max-height:none;"><table class="pt"><thead><tr><th>構成表</th><th>基準日</th><th>代替（基準日が無い場合）</th></tr></thead><tbody>${CS_KINDS.map(ruleRow).join('')}</tbody></table></div>
+      <div style="margin-top:8px;"><button class="btn btn-primary btn-sm" onclick="saveCsRules()">💾 ルールを保存</button>
+        <button class="btn btn-sm" onclick="state.config.csRules={};saveToGAS();renderConfigSheets();">初期値に戻す</button></div>
     </details>`;
+}
+function _csCsv(){
+  const h=['区分','機種','登録','タイトル','担当','販売時期','部品集約'];
+  CS_KINDS.forEach(x=>h.push(x.label+' 状態',x.label+' 依頼期限',x.label+' 依頼日',x.label+' 取得日',x.label+' URL'));
+  _ptCsvDownload('構成表一覧',h,(window._csList||[]).map(d=>[d.kind,d.key,d.m?'登録':'',d.title,d.person,d.sales,d.agg]
+    .concat(...d.cs.map(c=>[c.s.label,c.s.due,c.s.rec.req||'',c.s.rec.got||'',c.s.rec.url||'']))));
 }
 function saveCsRules(){
   const o={};

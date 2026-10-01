@@ -66,62 +66,117 @@ function _homeTodo(alerts,csTodo){
   return `<div class="todo-strip"><strong style="font-size:12px;margin-right:4px;">今やること</strong>${t.map(x=>`<span class="st ${x.c}" style="cursor:pointer;" onclick="${x.act}">${_e6(x.txt)}</span>`).join('')}</div>`;
 }
 
-let _homeTerm='', _homeScope='active';
+/* ---------- 一覧表の共通部品（見積管理「価格一覧表」と同じ表スタイル） ---------- */
+function _ptCsvDownload(name,headers,rows){
+  const q=v=>{const s=String(v==null?'':v);return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
+  const csv='﻿'+[headers].concat(rows).map(r=>r.map(q).join(',')).join('\r\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download=name+'_'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a);a.click();a.remove();
+}
+function _ptPrint(title,wrapId){
+  const el=document.getElementById(wrapId); if(!el)return;
+  const css=[...document.querySelectorAll('style')].map(s=>s.textContent).join('\n');
+  const w=window.open('','_blank'); if(!w){showToast('⚠️ ポップアップがブロックされました');return;}
+  w.document.write(`<html><head><meta charset="utf-8"><title>${_e6(title)}</title><style>${css}
+    body{background:#fff;padding:10px;font-family:sans-serif;} .pt-wrap{max-height:none;overflow:visible;border:none;}
+    table.pt thead th{position:static;} @page{size:A4 landscape;margin:8mm;}</style></head>
+    <body><h3 style="margin:0 0 6px;">${_e6(title)}</h3>${el.outerHTML}</body></html>`);
+  w.document.close();setTimeout(()=>w.print(),300);
+}
+function _ptChip(label,n,on,act){return `<button class="pt-chip${on?' on':''}" onclick="${act}">${label}<b>${n}</b></button>`;}
+// 基板品番 → 区分（M/D/DE/E/C）
+function _boardCat(model){
+  const s=String(model||'').replace(/^FJ\+/,'');
+  if(/^DE/.test(s))return 'DE';
+  if(/^(D|SNB|AXB|AG)/.test(s))return 'D';
+  if(/^M/.test(s))return 'M';
+  if(/^E/.test(s))return 'E';
+  if(/^C/.test(s))return 'C';
+  return '';
+}
+function _rowBoards(r){
+  const o={};
+  const db=r.db||{};const hw=db.hw||{};
+  if(r.m)(r.m.boards||[]).forEach(b=>{const c=_boardCat(b.model);if(c&&!o[c])o[c]=b.model;});
+  Object.entries(db.boards||{}).forEach(([c,v])=>{if(v&&!/^不要/.test(v)&&!o[c])o[c]=v;});
+  [['M','mainBoard'],['D','lcdBoard'],['DE','lcdIfBoard'],['E','effectIfBoard']].forEach(([c,f])=>{if(!o[c]&&hw[f])o[c]=hw[f];});
+  return o;
+}
+function _rowKind(r){
+  const db=r.db||{};
+  if(db.kind)return db.kind;
+  if(r.m&&/^[A-D]\d/.test(r.key))return 'パチンコ';
+  if(r.m&&/^(E|NA)\d/.test(r.key))return 'スロット';
+  return 'その他';
+}
+
+/* ---------- 機種一覧（トップ） ---------- */
+let _homeTerm='', _homeScope='active', _homeKind='', _homeCsOnly=false, _homeRegOnly=false, _homeLimit=200;
+function _homeData(){
+  const all=typeof _modelRows==='function'?_modelRows(_homeScope):MACHINES.map(m=>({key:m.id,m,db:null}));
+  const alerts=getMilestoneAlerts();
+  return all.map(r=>{
+    const db=r.db||{};const ll=db.longlead||{};
+    let st,due,prog='';
+    if(r.m){st=_machineStatus(r.m,alerts);due=db.salesDate||ll.deliveryDate||_machineDue(r.m)||'';prog=_machineProgress(r.m)+'%';}
+    else{due=db.salesDate||ll.deliveryDate||'';st=due&&due<_todayStr()?{label:'販売済',cls:'st-green'}:{label:'計画',cls:'st-gray'};}
+    const cs=typeof _csState==='function'?CS_KINDS.map(x=>({x,s:_csState(r.key,x.k)})):[];
+    return Object.assign({},r,{kind:_rowKind(r),title:db.title||'',person:(r.m&&r.m.person)||db.person||'',due,agg:db.aggDate||'',
+      qty:db.salesQty||ll.qty||(r.m?r.m.prodQty:'')||'',boards:_rowBoards(r),st,prog,cs,
+      csAlert:cs.some(c=>c.s.label==='依頼期限超過'||c.s.label==='要依頼')});
+  });
+}
 function renderHome(){
   if(typeof _loadModelDB==='function'&&!_mdbLoadStarted)_loadModelDB();
   const alerts=getMilestoneAlerts();
+  const data=_homeData();
   const term=_homeTerm.trim().toLowerCase();
-  // 登録機種(MACHINES) と 機種DB(生産計画Excel等) を統合して表示
-  const all=typeof _modelRows==='function'?_modelRows(_homeScope):MACHINES.map(m=>({key:m.id,m,db:null}));
-  const boardsOf=r=>r.m?(r.m.boards||[]).map(b=>b.model).filter(Boolean):(typeof _dbBoards==='function'?_dbBoards(r.db):[]);
-  const hit=r=>!term||(r.key+' '+((r.db||{}).title||'')+' '+(r.m?r.m.person:((r.db||{}).person||''))+' '+boardsOf(r).join(' ')).toLowerCase().includes(term);
-  const dueOf=r=>r.m?(_machineDue(r.m)||'9999'):((r.db||{}).salesDate||((r.db||{}).longlead||{}).deliveryDate||'9999');
-  const list=all.filter(hit).sort((a,b)=>{
-    if(!!a.m!==!!b.m)return a.m?-1:1;
-    return String(dueOf(a)).localeCompare(String(dueOf(b)));
-  });
+  const base=data.filter(d=>(!term||(d.key+' '+d.title+' '+d.person+' '+Object.values(d.boards).join(' ')).toLowerCase().includes(term))
+    &&(!_homeCsOnly||d.csAlert)&&(!_homeRegOnly||d.m));
+  const kinds=['パチンコ','スロット','その他'];
+  const list=base.filter(d=>!_homeKind||d.kind===_homeKind)
+    .sort((a,b)=>kinds.indexOf(a.kind)-kinds.indexOf(b.kind)||String(a.due||'9999').localeCompare(String(b.due||'9999'))||a.key.localeCompare(b.key));
+  window._homeList=list;
 
   const active=MACHINES.filter(m=>state.statuses[m.id]==='量産中').length;
   const near=MACHINES.filter(m=>state.statuses[m.id]!=='量産終了'&&isNear(_machineDue(m))).length;
   const csTodo=typeof _csTodo==='function'?_csTodo():[];
-  const planned=all.filter(r=>!r.m&&dueOf(r)!=='9999'&&dueOf(r)>=_todayStr()).length;
+  const planned=data.filter(d=>!d.m&&d.due&&d.due>=_todayStr()).length;
+  const openRow=d=>d.m?`openDetailModal('machine','${_e6(d.m.id)}')`:`openModelInfo('${_e6(d.key)}')`;
+  const fmt=v=>v?_e6(String(v).replace(/-/g,'/')):'<span class="same">—</span>';
+  const BC=['M','D','DE','E','C'];
 
-  const openRow=r=>r.m?`openDetailModal('machine','${_e6(r.m.id)}')`:`openModelInfo('${_e6(r.key)}')`;
-  const tree=list.map(r=>{
-    const boards=r.m?(r.m.boards||[]).filter(b=>b.model):boardsOf(r).map(x=>({type:'',model:x}));
-    return `<details class="tree-node" ${term?'open':''}>
-      <summary><span class="tree-machine" onclick="event.preventDefault();${openRow(r)}">${r.m?'📁':'🗂'} ${_e6(r.key)}</span>${r.db&&r.db.title?` <span class="muted" style="font-size:10px;font-weight:400;">${_e6(r.db.title)}</span>`:''}</summary>
-      ${boards.map(b=>`<div class="tree-board" onclick="openDetailModal('board','${_e6(b.model)}')" title="${_boardHasDocs(r.key,b.model)?'資料あり':'資料未登録'}">
-        <span>🔲 ${_e6(b.type||'基板')} <span class="tree-model">${_e6(b.model)}</span></span>
-        <span class="dot ${_boardHasDocs(r.key,b.model)?'dot-g':'dot-r'}"></span></div>`).join('')||'<div class="tree-board muted">基板未登録</div>'}
-    </details>`;
-  }).join('')||'<div class="muted" style="padding:10px;">該当なし</div>';
-
-  const rows=list.map(r=>{
-    const db=r.db||{};
-    let st,due,prog;
-    if(r.m){st=_machineStatus(r.m,alerts);due=_machineDue(r.m);prog=_ring(_machineProgress(r.m));}
-    else{due=db.salesDate||(db.longlead||{}).deliveryDate||'';st=due&&due<_todayStr()?{label:'販売済',cls:'st-green'}:{label:'計画',cls:'st-gray'};prog='<span class="muted">—</span>';}
-    return `<tr onclick="${openRow(r)}" style="cursor:pointer;">
-      <td><strong>${_e6(r.key)}</strong>${r.m?'':' <span class="muted" style="font-size:10px;">DB</span>'}<div class="muted" style="font-size:11px;">${_e6(db.title||'')}${r.m&&r.m.person?' ／ '+_e6(r.m.person):''}</div></td>
-      <td style="font-size:12px;">${boardsOf(r).map(_e6).join(', ')||'<span class="muted">—</span>'}</td>
-      <td><span class="st ${st.cls}">● ${_e6(st.label)}</span></td>
-      <td class="mono" style="font-size:12px;">${due?_e6(due.replace(/-/g,'/')):'<span class="muted">—</span>'}</td>
-      <td>${typeof _csChips==='function'?_csChips(r.key):''}</td>
-      <td>${prog}</td>
-      <td onclick="event.stopPropagation()" style="text-align:right;white-space:nowrap;">
-        ${r.m?`<button class="btn btn-sm" onclick="openEditModal('${_e6(r.m.id)}')">編集</button>`:''}</td>
-    </tr>`;
-  }).join('');
+  let body='',last='';
+  list.slice(0,_homeLimit).forEach(d=>{
+    if(d.kind!==last){last=d.kind;body+=`<tr class="pt-sec"><td colspan="${12+BC.length}">■ ${_e6(d.kind)}（${list.filter(x=>x.kind===d.kind).length}機種）</td></tr>`;}
+    body+=`<tr class="click" onclick="${openRow(d)}">
+      <td class="name">${_e6(d.key)}${d.m?'<span class="pt-tag">登録</span>':''}</td>
+      <td class="spec" title="${_e6(d.title)}">${_e6(d.title)||'<span class="same">—</span>'}</td>
+      <td>${_e6(d.person)||'<span class="same">—</span>'}</td>
+      <td class="c pt-cur">${fmt(d.due)}</td>
+      <td class="c">${fmt(d.agg)}</td>
+      <td class="num">${_e6(d.qty)||'<span class="same">—</span>'}</td>
+      ${BC.map(c=>`<td class="spec" style="max-width:110px;" title="${_e6(d.boards[c]||'')}">${_e6(d.boards[c]||'')||'<span class="same">—</span>'}</td>`).join('')}
+      ${d.cs.map(c=>`<td class="c cs" onclick="event.stopPropagation();openCsEditor('${_e6(d.key)}','${c.x.k}')" title="${_e6(c.s.label+(c.s.due?' 依頼期限 '+c.s.due:''))}"><span class="st ${c.s.cls}" style="padding:0 6px;">${_e6(c.s.label.replace('（販売済）',''))}</span></td>`).join('')}
+      <td class="c"><span class="st ${d.st.cls}" style="padding:0 6px;">${_e6(d.st.label)}</span></td>
+      <td class="num" style="font-weight:500;">${d.prog||'<span class="same">—</span>'}</td>
+      <td class="c" onclick="event.stopPropagation()">${d.m?`<button class="btn btn-sm" style="padding:1px 8px;" onclick="openEditModal('${_e6(d.m.id)}')">編集</button>`:''}</td></tr>`;
+  });
+  const n=k=>base.filter(d=>!k||d.kind===k).length;
+  const tree=list.slice(0,_homeLimit).map(d=>`<details class="tree-node" ${term?'open':''}>
+      <summary><span class="tree-machine" onclick="event.preventDefault();${openRow(d)}">${d.m?'📁':'🗂'} ${_e6(d.key)}</span>${d.title?` <span class="muted" style="font-size:10px;font-weight:400;">${_e6(d.title)}</span>`:''}</summary>
+      ${BC.filter(c=>d.boards[c]).map(c=>`<div class="tree-board" onclick="openDetailModal('board','${_e6(d.boards[c])}')"><span>🔲 ${c} <span class="tree-model">${_e6(d.boards[c])}</span></span>
+        <span class="dot ${_boardHasDocs(d.key,d.boards[c])?'dot-g':'dot-r'}"></span></div>`).join('')||'<div class="tree-board muted">基板未登録</div>'}
+    </details>`).join('')||'<div class="muted" style="padding:10px;">該当なし</div>';
 
   document.getElementById('page-dashboard').innerHTML=`
   <div class="home-wrap">
     <aside class="home-tree">
       <div class="home-tree-head">機種管理</div>
-      <input class="home-search" placeholder="🔍 機種・タイトル・基板で検索" value="${_e6(_homeTerm)}"
-        oninput="_homeTerm=this.value;renderHome();const el=document.querySelector('.home-search');el.focus();el.setSelectionRange(el.value.length,el.value.length);">
       <div class="home-tree-body">${tree}</div>
-      <div class="muted" style="font-size:10px;padding:8px 4px;"><span class="dot dot-g"></span> 資料あり　<span class="dot dot-r"></span> 資料未登録　📁 登録機種　🗂 機種DB</div>
+      <div class="muted" style="font-size:10px;padding:8px 4px;"><span class="dot dot-g"></span> 資料あり　<span class="dot dot-r"></span> 資料未登録</div>
     </aside>
     <section class="home-main">
       ${_homeTodo(alerts,csTodo)}
@@ -131,17 +186,35 @@ function renderHome(){
         <div class="kpi" style="cursor:pointer;" onclick="showPage('csheets')"><div class="kpi-ic" style="background:#b45309;">📑</div><div><div class="kpi-l">構成表 要依頼</div><div class="kpi-v">${csTodo.length}</div></div></div>
         <div class="kpi"><div class="kpi-ic" style="background:#15803d;">🗂</div><div><div class="kpi-l">今後の販売予定機種</div><div class="kpi-v">${planned}</div></div></div>
       </div>
-      <div class="table-wrap">
-        <div class="table-toolbar"><h2>機種一覧 <span class="muted" style="font-weight:400;font-size:12px;">${list.length}件</span></h2>
-          <div style="display:flex;gap:6px;">
-            <button class="btn btn-sm ${_homeScope==='active'?'btn-primary':''}" onclick="_homeScope='active';renderHome();">進行中・予定</button>
-            <button class="btn btn-sm ${_homeScope==='all'?'btn-primary':''}" onclick="_homeScope='all';renderHome();">全機種</button>
-            <button class="btn btn-sm" onclick="openImportModal()">📥 外部データ取り込み</button></div></div>
-        <table><thead><tr><th>機種名</th><th>関連基板</th><th>ステータス</th><th>納期・販売時期</th><th title="準=量産準備用 見=見本機用 量=量産用">構成表</th><th>進行状況</th><th></th></tr></thead>
-        <tbody>${rows||'<tr><td colspan="7" class="muted" style="text-align:center;padding:20px;">該当する機種がありません</td></tr>'}</tbody></table>
+      <div class="pt-bar">
+        ${_ptChip('すべて',n(''),!_homeKind,"_homeKind='';_homeLimit=200;renderHome()")}
+        ${_ptChip('🎰 パチンコ',n('パチンコ'),_homeKind==='パチンコ',"_homeKind='パチンコ';_homeLimit=200;renderHome()")}
+        ${_ptChip('🎲 スロット',n('スロット'),_homeKind==='スロット',"_homeKind='スロット';_homeLimit=200;renderHome()")}
+        <input id="home-q" class="pt-in" style="flex:1;min-width:200px;" placeholder="機種・タイトル・担当・基板品番で検索..." value="${_e6(_homeTerm)}"
+          oninput="clearTimeout(window._hT);window._hT=setTimeout(()=>{_homeTerm=this.value;_homeLimit=200;renderHome();const el=document.getElementById('home-q');el.focus();el.setSelectionRange(el.value.length,el.value.length);},250)">
+        <select class="pt-in" onchange="_homeScope=this.value;renderHome()">
+          <option value="active"${_homeScope==='active'?' selected':''}>進行中・予定の機種</option><option value="all"${_homeScope==='all'?' selected':''}>全機種（過去機種を含む）</option></select>
+        <label style="font-size:12px;display:flex;align-items:center;gap:4px;"><input type="checkbox" ${_homeCsOnly?'checked':''} onchange="_homeCsOnly=this.checked;renderHome()"> 構成表 要依頼のみ</label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:4px;"><input type="checkbox" ${_homeRegOnly?'checked':''} onchange="_homeRegOnly=this.checked;renderHome()"> 登録機種のみ</label>
+        <button class="btn btn-sm" onclick="_ptPrint('機種一覧','home-pt')">🖨 印刷</button>
+        <button class="btn btn-sm" style="color:#16a34a;border-color:#16a34a;" onclick="_homeCsv()">📥 CSV</button>
+        <button class="btn btn-sm" onclick="openImportModal()">📥 取り込み</button>
       </div>
+      <div class="pt-info">${list.length}機種（うち構成表の要依頼 <b style="color:#dc2626;">${list.filter(d=>d.csAlert).length}</b>）。黄色が販売時期（生産計画に無い登録機種は量産出荷日）。行クリックで詳細、構成表のセルクリックで依頼日・取得日を登録できます。</div>
+      <div class="pt-wrap" id="home-pt"><table class="pt"><thead>
+        <tr><th rowspan="2">機種</th><th rowspan="2">タイトル</th><th rowspan="2">担当</th>
+          <th colspan="3">生産計画</th><th colspan="${BC.length}">使用基板</th><th colspan="3">構成表</th>
+          <th rowspan="2">状態</th><th rowspan="2">進行</th><th rowspan="2"></th></tr>
+        <tr><th class="pt-cur">販売時期</th><th>部品集約</th><th>台数</th>${BC.map(c=>`<th>${c}</th>`).join('')}<th>量産準備用</th><th>見本機用</th><th>量産用</th></tr>
+      </thead><tbody>${body||`<tr><td colspan="${12+BC.length}" class="c same" style="padding:20px;">該当する機種がありません</td></tr>`}</tbody></table></div>
+      ${list.length>_homeLimit?`<div style="text-align:center;margin:8px;"><button class="btn btn-sm" onclick="_homeLimit+=300;renderHome()">さらに表示（残り ${list.length-_homeLimit}機種）</button></div>`:''}
     </section>
   </div>`;
+}
+function _homeCsv(){
+  const BC=['M','D','DE','E','C'];
+  _ptCsvDownload('機種一覧',['区分','機種','登録','タイトル','担当','販売時期','部品集約','台数'].concat(BC).concat(['量産準備用','見本機用','量産用','状態','進行']),
+    (window._homeList||[]).map(d=>[d.kind,d.key,d.m?'登録':'',d.title,d.person,d.due,d.agg,d.qty].concat(BC.map(c=>d.boards[c]||'')).concat(d.cs.map(c=>c.s.label+(c.s.rec.req?' 依頼'+c.s.rec.req:'')+(c.s.rec.got?' 取得'+c.s.rec.got:''))).concat([d.st.label,d.prog])));
 }
 
 /* ---------- 資料一覧 ---------- */
@@ -169,27 +242,35 @@ function _collectDocs(){
 }
 function renderDocs(){
   const all=_collectDocs();
-  const types=[...new Set(all.map(d=>d.type))].sort();
   const t=_docsTerm.trim().toLowerCase();
-  const list=all.filter(d=>(!_docsType||d.type===_docsType)&&(!t||(d.name+' '+d.owner+' '+d.type).toLowerCase().includes(t)));
+  const base=all.filter(d=>!t||(d.name+' '+d.owner+' '+d.type).toLowerCase().includes(t));
+  const types=[...new Set(all.map(d=>d.type))].sort();
+  const list=base.filter(d=>!_docsType||d.type===_docsType).sort((a,b)=>a.type.localeCompare(b.type)||String(b.date).localeCompare(String(a.date)));
+  window._docsList=list;
+  let body='',last='';
+  list.forEach(d=>{
+    if(d.type!==last){last=d.type;body+=`<tr class="pt-sec"><td colspan="5">■ ${_e6(d.type)}（${list.filter(x=>x.type===d.type).length}件）</td></tr>`;}
+    body+=`<tr><td class="name"><a class="q" href="${_e6(d.url)}" target="_blank" rel="noopener">📄 ${_e6(d.name)}</a></td>
+      <td>${_e6(d.owner)}</td><td class="c pt-cur">${_e6(d.date||'')||'<span class="same">—</span>'}</td>
+      <td class="spec">${_e6(d.type)}</td>
+      <td class="c"><a class="btn btn-sm" style="padding:1px 8px;" href="${_e6(d.url)}" target="_blank" rel="noopener">開く</a></td></tr>`;
+  });
   document.getElementById('page-docs').innerHTML=`
-    <div class="table-wrap">
-      <div class="table-toolbar"><h2>資料一覧 <span class="muted" style="font-weight:400;font-size:12px;">${list.length} / ${all.length}件</span></h2>
-        <button class="btn btn-primary btn-sm" onclick="openImportModal()">📥 外部データ取り込み</button></div>
-      <div style="display:flex;gap:8px;padding:0 14px 12px;flex-wrap:wrap;">
-        <input class="home-search" style="flex:1;min-width:220px;margin:0;" placeholder="🔍 資料名・機種・基板で検索" value="${_e6(_docsTerm)}"
-          oninput="_docsTerm=this.value;renderDocs();const el=document.querySelector('#page-docs .home-search');el.focus();el.setSelectionRange(el.value.length,el.value.length);">
-        <select onchange="_docsType=this.value;renderDocs();" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:12px;">
-          <option value="">すべての種別</option>${types.map(x=>`<option value="${_e6(x)}"${x===_docsType?' selected':''}>${_e6(x)}</option>`).join('')}
-        </select>
-      </div>
-      <table><thead><tr><th>資料名</th><th>種別</th><th>機種 / 基板</th><th>日付</th><th></th></tr></thead>
-      <tbody>${list.map(d=>`<tr>
-        <td>📄 ${_e6(d.name)}</td><td style="font-size:12px;">${_e6(d.type)}</td><td style="font-size:12px;">${_e6(d.owner)}</td>
-        <td class="mono" style="font-size:12px;">${_e6(d.date||'—')}</td>
-        <td style="text-align:right;"><a class="btn btn-sm" href="${_e6(d.url)}" target="_blank" rel="noopener">開く</a></td></tr>`).join('')
-        ||'<tr><td colspan="5" class="muted" style="text-align:center;padding:20px;">資料がありません。「外部データ取り込み」から追加できます。</td></tr>'}</tbody></table>
-    </div>`;
+    <div class="pt-bar">
+      ${_ptChip('すべて',base.length,!_docsType,"_docsType='';renderDocs()")}
+      ${types.map(x=>_ptChip(_e6(x),base.filter(d=>d.type===x).length,_docsType===x,`_docsType='${_e6(x)}';renderDocs()`)).join('')}
+    </div>
+    <div class="pt-bar">
+      <input id="docs-q" class="pt-in" style="flex:1;min-width:220px;" placeholder="資料名・機種・基板・種別で検索..." value="${_e6(_docsTerm)}"
+        oninput="clearTimeout(window._dT);window._dT=setTimeout(()=>{_docsTerm=this.value;renderDocs();const el=document.getElementById('docs-q');el.focus();el.setSelectionRange(el.value.length,el.value.length);},250)">
+      <button class="btn btn-sm" onclick="_ptPrint('資料一覧','docs-pt')">🖨 印刷</button>
+      <button class="btn btn-sm" style="color:#16a34a;border-color:#16a34a;" onclick="_ptCsvDownload('資料一覧',['種別','資料名','機種/基板','日付','URL'],(window._docsList||[]).map(d=>[d.type,d.name,d.owner,d.date,d.url]))">📥 CSV</button>
+      <button class="btn btn-primary btn-sm" onclick="openImportModal()">📥 外部データ取り込み</button>
+    </div>
+    <div class="pt-info">${list.length}件。黄色が資料の日付（取込資料はファイル名の日付）。資料名クリックで開きます。</div>
+    <div class="pt-wrap" id="docs-pt"><table class="pt"><thead>
+      <tr><th>資料名</th><th>機種 / 基板</th><th class="pt-cur">日付</th><th>種別</th><th></th></tr></thead>
+      <tbody>${body||'<tr><td colspan="5" class="c same" style="padding:20px;">資料がありません。「外部データ取り込み」から追加できます。</td></tr>'}</tbody></table></div>`;
 }
 
 /* ---------- 外部データ取り込み（モーダル） ---------- */

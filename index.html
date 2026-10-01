@@ -25,6 +25,7 @@
       <div class="sidebar-section-label">メインメニュー</div>
       <div class="nav-item active" data-page="dashboard"><span class="nav-item-icon">📋</span><span class="nav-item-label">機種一覧</span></div>
       <div class="nav-item" data-page="schedule"><span class="nav-item-icon">📅</span><span class="nav-item-label">スケジュール</span></div>
+      <div class="nav-item" data-page="csheets"><span class="nav-item-icon">📑</span><span class="nav-item-label">構成表</span></div>
       <div class="nav-item" data-page="flow"><span class="nav-item-icon">📈</span><span class="nav-item-label">進捗状況</span></div>
       <div class="nav-item" data-page="docs"><span class="nav-item-icon">📁</span><span class="nav-item-label">資料一覧</span></div>
       <div class="nav-item nav-more-toggle" onclick="toggleNavMore()"><span class="nav-item-icon">📂</span><span class="nav-item-label">その他</span><span id="nav-more-arrow" style="margin-left:auto;font-size:10px;opacity:.7;">▸</span></div>
@@ -51,7 +52,7 @@
     <div id="topbar">
       <div>
         <div class="topbar-title" id="topbar-title">機種一覧</div>
-        <div class="topbar-sub">遊技機 基板・エコ進捗管理 <span style="color:#dc2626;font-weight:700;">[build:v2-simple3]</span></div>
+        <div class="topbar-sub">遊技機 基板・エコ進捗管理 <span style="color:#dc2626;font-weight:700;">[build:v2-db1]</span></div>
       </div>
       <div class="topbar-spacer"></div>
       <div class="topbar-actions">
@@ -80,6 +81,7 @@
       <div id="page-priceimpact" class="page"></div>
       <div id="page-catalog" class="page"></div>
       <div id="page-docs" class="page"></div>
+      <div id="page-csheets" class="page"></div>
     </div>
   </div>
 </div>
@@ -710,5 +712,6 @@
 <?!= include('appjs4'); ?>
 <?!= include('appjs5'); ?>
 <?!= include('appjs6'); ?>
+<?!= include('appjs7'); ?>
 </body>
 </html>

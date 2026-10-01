@@ -1244,6 +1244,12 @@ function _excelDateStr(v){
 }
 
 function parseSunDenshiRows(rows,sheetName){
+  // 機種DBへ全機種を登録（既存機種の更新プレビューとは独立）
+  if(typeof _mdbFromSunDenshiRows==='function'){
+    const st=_mdbFromSunDenshiRows(rows,sheetName);
+    if(st.added||st.updated){_saveModelDB('🗂 機種DB '+_statMsg('生産計画Excel '+sheetName,st));showToast('🗂 機種DB '+_statMsg('生産計画Excel',st));}
+    if(st.added||st.updated){state.config.lastSunDenshiImportAt=_todayStr();state.config.lastSunDenshiImportSheet=sheetName;saveToGAS();}
+  }
   // 機種コード行: '機種名' ラベルのある行
   let codeRowIdx=-1, nameRowIdx=-1, salesRowIdx=-1;
   for(let i=0;i<Math.min(rows.length,15);i++){

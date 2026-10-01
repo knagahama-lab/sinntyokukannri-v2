@@ -109,7 +109,7 @@ function getPriceImpactData() {
  * 書かない(例: 'image/'+'*' のように分割する)。
  */
 function getAppBundle() {
-  var files = ['appjs1', 'appjs2', 'appjs3', 'appjs4', 'appjs5', 'appjs6'];
+  var files = ['appjs1', 'appjs2', 'appjs3', 'appjs4', 'appjs5', 'appjs6', 'appjs7'];
   var code = files.map(function(name) {
     var raw = HtmlService.createHtmlOutputFromFile(name).getContent();
     // 各ファイルは HtmlService.createHtmlOutputFromFile() が
@@ -591,6 +591,50 @@ function archiveImportFile(fileName, base64Data, mimeType, category) {
       fileId: file.getId(), fileName: fileName, url: file.getUrl(),
       folderUrl: catFolder.getUrl(),
       uploadedAt: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
+    });
+  } catch (e) {
+    return JSON.stringify({ success: false, error: e.message });
+  }
+}
+
+/* ============================================================
+   機種DB（生産計画Excel・HW構成一覧表PDF・長納期計画PDF・連携シートを統合）
+   機種数が多く ScriptProperties の容量を圧迫するため、Drive上の
+   JSONファイル「営業進捗管理_機種DB.json」に保存する。
+============================================================ */
+function _modelDbFile() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('modelDbFileId');
+  if (id) { try { var f = DriveApp.getFileById(id); if (!f.isTrashed()) return f; } catch (e) {} }
+  var roots = DriveApp.getFoldersByName('営業進捗管理_取込資料');
+  var folder = roots.hasNext() ? roots.next() : DriveApp.createFolder('営業進捗管理_取込資料');
+  var file = folder.createFile('営業進捗管理_機種DB.json', '{}', 'application/json');
+  props.setProperty('modelDbFileId', file.getId());
+  return file;
+}
+function loadModelDB() {
+  try { return _modelDbFile().getBlob().getDataAsString('UTF-8') || '{}'; }
+  catch (e) { return JSON.stringify({ __error: e.message }); }
+}
+function saveModelDB(json) {
+  try { JSON.parse(json); _modelDbFile().setContent(json); return JSON.stringify({ success: true }); }
+  catch (e) { return JSON.stringify({ success: false, error: e.message }); }
+}
+
+/**
+ * 連携スプレッドシートの全シートの表示値を返す（機種DB取込用）。
+ * レイアウト判定・列の対応付けはクライアント側で行う。
+ */
+function readSheetValues(spreadsheetId) {
+  try {
+    var ss = SpreadsheetApp.openById(String(spreadsheetId).trim());
+    return JSON.stringify({
+      success: true, name: ss.getName(),
+      sheets: ss.getSheets().map(function(sh) {
+        var r = Math.min(sh.getLastRow(), 400), c = Math.min(sh.getLastColumn(), 80);
+        return { name: sh.getName(), gid: sh.getSheetId(),
+                 values: r > 0 && c > 0 ? sh.getRange(1, 1, r, c).getDisplayValues() : [] };
+      }),
     });
   } catch (e) {
     return JSON.stringify({ success: false, error: e.message });

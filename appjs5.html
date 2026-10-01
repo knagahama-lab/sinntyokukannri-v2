@@ -800,6 +800,7 @@ function renderPriceImpact(){
 function renderPage(page){
   if(page==='dashboard')renderHome();
   else if(page==='docs')renderDocs();
+  else if(page==='csheets')renderConfigSheets();
   else if(page==='schedule')renderSchedule();
   else if(page==='eco')renderEco();
   else if(page==='flow')renderFlow();
@@ -860,6 +861,7 @@ function _init(saved){
       if(s.catalogModels)Object.assign(state.catalogModels,s.catalogModels);
       if(s.catalogBoards)Object.assign(state.catalogBoards,s.catalogBoards);
       if(Array.isArray(s.importArchive))state.importArchive=s.importArchive;
+      if(s.configSheets)state.configSheets=s.configSheets;
       if(s.driveFiles)Object.assign(state.driveFiles,s.driveFiles);
       if(s.linkageUrlOverrides)Object.assign(state.linkageUrlOverrides,s.linkageUrlOverrides);
       if(s.config&&s.config.tabSettings)Object.assign(state.config.tabSettings,s.config.tabSettings);

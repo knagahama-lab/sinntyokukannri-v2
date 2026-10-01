@@ -184,6 +184,7 @@ function saveToGAS(alertDesc){
       catalogModels:state.catalogModels,
       catalogBoards:state.catalogBoards,
       importArchive:state.importArchive,
+      configSheets:state.configSheets,
     });
     google.script.run.saveData(json);
     if(alertDesc && state.config.notifyEmail){
@@ -197,7 +198,7 @@ function saveToGAS(alertDesc){
 ============================================================ */
 let currentPage='dashboard';
 const PAGE_TITLES={
-  dashboard:'機種一覧',schedule:'スケジュール',docs:'資料一覧',
+  dashboard:'機種一覧',schedule:'スケジュール',docs:'資料一覧',csheets:'構成表',
   eco:'エコフロー管理',flow:'進捗状況（業務フロー）',admin:'管理コンソール',log:'更新ログ',
   parts:'機種管理',boards:'基板管理',
   priceimpact:'値上げインパクト',catalog:'製品図鑑',future:'将来機種計画',
@@ -538,6 +539,7 @@ function setupDailyTrigger(){
 const TAB_DEFS=[
   {id:'dashboard',icon:'📋',defaultLabel:'機種一覧',section:'main',required:true},
   {id:'schedule', icon:'📅',defaultLabel:'スケジュール',  section:'main'},
+  {id:'csheets',  icon:'📑',defaultLabel:'構成表',        section:'main'},
   {id:'eco',      icon:'♻️',defaultLabel:'エコフロー',    section:'main'},
   {id:'flow',     icon:'📈',defaultLabel:'進捗状況',    section:'main'},
   {id:'future',   icon:'🔭',defaultLabel:'将来機種計画',  section:'main'},

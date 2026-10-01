@@ -338,6 +338,7 @@ async function handleProdPlanPDF(event){
       if(prev)prev.innerHTML='<div style="color:var(--danger);font-size:12px;">⚠️ 生産計画の表構造を検出できませんでした</div>';
       return;
     }
+    if(typeof _mdbFromLongLead==='function')_mdbFromLongLead(parsed,file.name);
     _showProdPlanPreview(parsed, prev, file.name);
   }catch(err){
     if(prev)prev.innerHTML=`<div style="color:var(--danger);font-size:12px;">⚠️ PDF読み取りエラー: ${err.message}</div>`;

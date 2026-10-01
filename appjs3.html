@@ -838,7 +838,7 @@ function renderAdmin(){
           </div>
           <div class="form-field">
             <label>システム URL（メール内リンク用）</label>
-            <input type="text" id="notify-appurl-input" placeholder="https://script.google.com/macros/s/.../exec"
+            <input type="text" id="notify-appurl-input" placeholder="https:&#47;&#47;script.google.com/macros/s/.../exec"
               value="${state.config.appUrl||''}">
           </div>
         </div>
@@ -859,7 +859,7 @@ function renderAdmin(){
     <div class="admin-section">
       <div class="admin-section-head">
         <h3>🔗 見積管理システム連携</h3>
-        <a href="https://github.com/knagahama-lab/mitumorikannri-VR3" target="_blank" style="font-size:11px;color:var(--primary);">mitumorikannri-VR3 ↗</a>
+        <a href="https:&#47;&#47;github.com/knagahama-lab/mitumorikannri-VR3" target="_blank" style="font-size:11px;color:var(--primary);">mitumorikannri-VR3 ↗</a>
       </div>
       <div class="admin-section-body">
 
@@ -879,7 +879,7 @@ function renderAdmin(){
         <div id="linkage-panel-url">
           <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
             <input type="text" id="linkage-url-input"
-              placeholder="https://script.google.com/a/macros/.../exec"
+              placeholder="https:&#47;&#47;script.google.com/a/macros/.../exec"
               value="${state.config.linkageUrl||''}"
               style="flex:1;min-width:300px;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;">
             <button class="btn btn-sm btn-primary" onclick="saveLinkageUrl()">URL保存</button>

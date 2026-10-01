@@ -332,7 +332,7 @@ function _loadXLSX(cb){
   if(typeof XLSX!=='undefined'){cb();return;}
   showToast('⏳ XLSXライブラリを読み込み中…');
   const s=document.createElement('script');
-  s.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+  s.src='https:/'+'/cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
   s.onload=cb;
   s.onerror=()=>showToast('⚠️ XLSXの読み込みに失敗しました');
   document.head.appendChild(s);

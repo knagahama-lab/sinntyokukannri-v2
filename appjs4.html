@@ -309,7 +309,7 @@ async function handleProdPlanPDF(event){
     try{
       await new Promise((resolve,reject)=>{
         const s=document.createElement('script');
-        s.src='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+        s.src='https:/'+'/cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
         s.onload=resolve; s.onerror=reject;
         document.head.appendChild(s);
       });
@@ -318,7 +318,7 @@ async function handleProdPlanPDF(event){
       return;
     }
   }
-  pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  pdfjsLib.GlobalWorkerOptions.workerSrc='https:/'+'/cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 
   try{
     const buf=await file.arrayBuffer();

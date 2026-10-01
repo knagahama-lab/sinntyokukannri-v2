@@ -326,6 +326,8 @@ select:focus{border-color:var(--primary);}
   .gantt-container{overflow:visible;}
 }
 
+/* 診断パネルは常に非表示（ログはブラウザのコンソールに残る） */
+#diag-panel{display:none!important;}
 /* ===== シンプル画面（機種一覧・資料一覧・取り込み） ===== */
 .home-wrap{display:flex;gap:16px;align-items:flex-start;}
 .home-tree{width:260px;flex-shrink:0;background:#fff;border:1px solid var(--border-light);border-radius:12px;padding:12px;position:sticky;top:12px;max-height:calc(100vh - 120px);display:flex;flex-direction:column;}

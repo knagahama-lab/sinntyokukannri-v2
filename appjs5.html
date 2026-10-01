@@ -893,7 +893,7 @@ function _init(saved){
       _diag('_init完了、renderDashboard実行済み');
     }catch(e){
       _diag('_init内でエラー: '+e.message);
-      if(_diagEl){_diagEl.style.display='block';_diagEl.style.background='#7f1d1d';}
+      if(_diagEl){_diagEl.style.background='#7f1d1d';}
     }
   }
   var _loadAttempt=0;
@@ -912,7 +912,7 @@ function _init(saved){
       if(_loadAttempt<3){_startLoad();}
       else{
         _diag('3回とも応答なし。ページを再読み込みしてください。');
-        if(_diagEl){_diagEl.style.display='block';_diagEl.style.background='#7f1d1d';}
+        if(_diagEl){_diagEl.style.background='#7f1d1d';}
       }
     },15000);
     google.script.run
@@ -921,7 +921,7 @@ function _init(saved){
         done=true;clearTimeout(timeoutId);
         _diag('loadData失敗: '+(err&&err.message));
         if(_loadAttempt<3){setTimeout(_startLoad,1000);}
-        else if(_diagEl){_diagEl.style.display='block';_diagEl.style.background='#7f1d1d';}
+        else if(_diagEl){_diagEl.style.background='#7f1d1d';}
       })
       .loadData();
   }

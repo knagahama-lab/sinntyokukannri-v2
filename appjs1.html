@@ -199,8 +199,8 @@ let currentPage='dashboard';
 const PAGE_TITLES={
   dashboard:'ダッシュボード',schedule:'スケジュール',
   eco:'エコフロー管理',flow:'業務フロー',admin:'管理コンソール',log:'更新ログ',
-  parts:'機種管理（基板構成・BOM・在庫）',
-  boards:'基板管理（基板マスタ・仕様・価格・使用部品）',
+  parts:'機種管理',boards:'基板管理',
+  priceimpact:'値上げインパクト',catalog:'製品図鑑',future:'将来機種計画',
 };
 
 function showPage(page){
@@ -209,10 +209,26 @@ function showPage(page){
   document.getElementById('page-'+page).classList.add('active');
   const nav=document.querySelector(`.nav-item[data-page="${page}"]`);
   if(nav)nav.classList.add('active');
+  if(nav&&nav.closest('#nav-more'))_setNavMore(true); // 「その他」内の画面を開いたらメニューも展開
   document.getElementById('topbar-title').textContent=PAGE_TITLES[page]||page;
   currentPage=page;
   renderPage(page);
 }
+
+/* サイドバー「その他」（常用以外の画面）の開閉。状態はブラウザに記憶 */
+function _setNavMore(open){
+  const box=document.getElementById('nav-more');
+  const arrow=document.getElementById('nav-more-arrow');
+  if(!box)return;
+  box.style.display=open?'':'none';
+  if(arrow)arrow.textContent=open?'▾':'▸';
+  try{localStorage.setItem('navMoreOpen',open?'1':'0');}catch(e){}
+}
+function toggleNavMore(){
+  const box=document.getElementById('nav-more');
+  _setNavMore(box&&box.style.display==='none');
+}
+try{if(localStorage.getItem('navMoreOpen')==='1')_setNavMore(true);}catch(e){}
 
 document.querySelectorAll('.nav-item[data-page]').forEach(el=>{
   el.addEventListener('click',()=>showPage(el.dataset.page));

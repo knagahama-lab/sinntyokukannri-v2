@@ -524,8 +524,36 @@ function renderDashboard(){
       <tbody>${ecoRows}</tbody></table></div>`;
   }
 
-  document.getElementById('page-dashboard').innerHTML=`
-    ${alertHtml}
+  // ★ シンプル表示: 「今やること（要対応）」だけを上に出し、
+  //   KPI・機種一覧・エコサマリーは折りたたみ（開閉状態はブラウザに記憶）。
+  const todo=[];
+  msAlerts.filter(a=>a.urgent).forEach(a=>todo.push({lv:0,icon:'🚨',id:a.machineId,what:a.label,when:'期限超過',act:`openEditModal('${a.machineId}')`}));
+  nearItems.sort((a,b)=>a.diff-b.diff).forEach(i=>todo.push({lv:1,icon:'⚠️',id:i.id,what:i.label,when:i.diff===0?'本日':`${i.diff}日後`,act:`showPage('schedule')`}));
+  msAlerts.filter(a=>!a.urgent).forEach(a=>todo.push({lv:2,icon:'⏰',id:a.machineId,what:a.label,when:`あと${a.diff}日`,act:`openEditModal('${a.machineId}')`}));
+  {
+    const lastImp=state.config.lastSunDenshiImportAt;
+    const daysSince=lastImp?Math.floor((todayD-new Date(lastImp))/86400000):null;
+    if(!lastImp||daysSince>35)todo.push({lv:3,icon:'📊',id:'—',what:'生産計画Excelの月次取込',when:lastImp?`${daysSince}日経過`:'未取込',act:`showPage('future')`});
+  }
+  const lvColor=['#991b1b','#92400e','#92400e','#475569'];
+  const lvBg=['#fef2f2','#fffbeb','#fffbeb','#f8fafc'];
+  const todoHtml=`<div class="table-wrap" style="margin-bottom:16px;">
+      <div class="table-toolbar"><h2>✅ 今やること ${todo.length?`<span style="background:#dc2626;color:#fff;border-radius:10px;padding:0 8px;font-size:12px;margin-left:4px;">${todo.length}</span>`:''}</h2></div>
+      ${todo.length?`<table><tbody>${todo.map(t=>`<tr style="background:${lvBg[t.lv]};">
+          <td style="width:28px;text-align:center;">${t.icon}</td>
+          <td style="font-weight:700;white-space:nowrap;">${_escD(t.id)}</td>
+          <td>${_escD(t.what)}</td>
+          <td style="white-space:nowrap;color:${lvColor[t.lv]};font-weight:700;">${_escD(t.when)}</td>
+          <td style="text-align:right;"><button class="btn btn-sm" onclick="${t.act}">開く</button></td>
+        </tr>`).join('')}</tbody></table>`
+      :`<div style="padding:18px;text-align:center;color:var(--text-sub);font-size:13px;">今すぐ対応が必要な項目はありません 🎉</div>`}
+    </div>`;
+  const fold=(key,title,body)=>`<details class="dash-fold" data-key="${key}" ${_dashFoldOpen(key)?'open':''} ontoggle="_dashFoldSave(this)" style="margin-bottom:12px;">
+      <summary style="cursor:pointer;font-size:13px;font-weight:700;padding:10px 14px;background:var(--surface,#fff);border:1px solid var(--border-light);border-radius:10px;">${title}</summary>
+      <div style="margin-top:10px;">${body}</div></details>`;
+
+  document.getElementById('page-dashboard').innerHTML=todoHtml
+    +fold('machines',`📋 機種一覧（${totalM}機種 ／ 量産中 ${active}・量産前 ${waiting}・終了 ${done}）`,`
     <div class="summary-grid">
       <div class="summary-card"><div class="lbl">登録機種数</div><div class="val">${totalM}</div><div class="sub">全機種</div></div>
       <div class="summary-card"><div class="lbl">量産中</div><div class="val c-blue">${active}</div><div class="sub">生産進行中</div></div>
@@ -542,13 +570,12 @@ function renderDashboard(){
         <th class="center">見本機出荷</th><th class="center">量産実装</th><th class="center">量産組立</th><th class="center">量産出荷</th>
         <th>備考</th><th>見積</th><th></th>
       </tr></thead><tbody>${machineRows}</tbody></table>
-    </div>
-    ${ecoHtml}
-    <div style="margin-top:12px;display:flex;gap:12px;font-size:11px;color:var(--text-muted);align-items:center;">
-      <span class="badge badge-warning" style="font-size:10px;">直近</span>7日以内
-      <span class="badge badge-done" style="font-size:10px;">完了</span>完了済み
-    </div>`;
+    </div>`)
+    +(ecoHtml?fold('eco',`♻️ エコ台数サマリー（処理中 ${ecoTotal}台）`,ecoHtml):'');
 }
+function _escD(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function _dashFoldOpen(key){try{return localStorage.getItem('dashFold_'+key)==='1';}catch(e){return false;}}
+function _dashFoldSave(el){try{localStorage.setItem('dashFold_'+el.dataset.key,el.open?'1':'0');}catch(e){}}
 
 
 /* ============================================================

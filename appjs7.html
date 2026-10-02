@@ -34,7 +34,7 @@ function _normDate(v){
 
 /* ---------- 機種DB 基本操作 ---------- */
 function _mdb(key){
-  if(!state.modelDB[key])state.modelDB[key]={key,code:key,title:'',kind:'',brand:'',series:'',person:'',
+  if(!state.modelDB[key])state.modelDB[key]={key,code:(typeof _dispKey==='function'?_dispKey(key):key),title:'',kind:'',brand:'',series:'',person:'',
     salesDate:'',aggDate:'',targetQty:'',salesQty:'',boards:{},hw:{},longlead:{},sheets:{},src:{},updatedAt:''};
   return state.modelDB[key];
 }
@@ -49,6 +49,7 @@ function _mdbMerge(key,patch,srcName,stat){
     if(typeof v==='object'&&!Array.isArray(v)){r[k]=Object.assign({},r[k]||{},Object.fromEntries(Object.entries(v).filter(([,x])=>x!=null&&x!=='')));}
     else r[k]=v;
   });
+  { const i=String(key).indexOf(':'); r.customer=(i>0&&typeof _customers==='function'&&_customers().some(c=>c.id===key.slice(0,i)))?key.slice(0,i):(r.customer||'fuji'); }
   r.src[srcName]=_todayStr();
   r.updatedAt=_todayStr();
   if(stat){isNew?stat.added++:stat.updated++;}
@@ -105,7 +106,7 @@ function _mdbFromSunDenshiRows(rows,sheetName,srcTag){
     const title=String(cell(nameIdx,col)||'').trim();
     const sales=_normDate(cell(salesIdx,col));
     if(!title&&!sales)continue; // 備考列などは除外
-    const key=_mkey(raw); if(!key)continue;
+    const key=_ikey(raw); if(!key)continue;
     const boards={};
     boardRows.forEach(br=>{const v=cell(br.idx,col);if(v!=null&&String(v).trim())boards[br.cat]=String(v).trim();});
     _mdbMerge(key,{
@@ -125,7 +126,7 @@ function _mdbFromSunDenshiRows(rows,sheetName,srcTag){
 function _mdbFromLongLead(list,fileName){
   const st={added:0,updated:0};
   (list||[]).forEach(m=>{
-    const key=_mkey(m.rawName||m.id); if(!key)return;
+    const key=_ikey(m.rawName||m.id); if(!key)return;
     _mdbMerge(key,{
       kind:/パチスロ/.test(m.type||'')?'スロット':/パチンコ/.test(m.type||'')?'パチンコ':'',
       brand:m.brand||'',
@@ -311,7 +312,7 @@ async function handleHwSpecPDF(ev){
       const recs=await _hwParsePdf(await f.arrayBuffer());
       const ver=(f.name.match(/_(\d{6})/)||[])[1]||'';
       recs.forEach(r=>{
-        const key=_mkey(r.code); if(!key)return;
+        const key=_ikey(r.code); if(!key)return;
         const hw=Object.assign({},r.hw,{abbr:r.abbr,orient:r.orient,version:ver});
         _mdbMerge(key,{code:r.code,series:r.series,title:r.title,person:r.person,kind:r.kind,hw},'HW構成一覧表 '+(ver||f.name),st);
         n++;
@@ -331,13 +332,17 @@ const _SHEET_COLS={
   salesDate:['販売時期','販売日','発売日','納品日','納期','販売予定'],
   salesQty:['販売台数','台数','受注台数','数量','量産台数'],
   person:['担当','担当者','営業担当'],
+  kind:['種別','区分','機種区分','タイプ','遊技機種別'],
 };
 const _SHEET_BOARDS={M:['主基板','主制御基板','M基板'],D:['液晶制御基板','D基板'],DE:['液晶IF基板','DE基板'],E:['演出基板','演出IF基板','E基板'],C:['払出基板','サブ制御基板','C基板']};
 function _mdbFromSheetValues(ssName,sheets){
   const st={added:0,updated:0};
   (sheets||[]).forEach(sh=>{
     const v=sh.values||[];
-    const isTransposed=v.slice(0,20).some(r=>(r||[]).slice(0,5).some(x=>String(x).trim()==='機種名'))&&v.slice(0,20).some(r=>(r||[]).slice(0,5).some(x=>String(x).trim()==='タイトル'));
+    // 転置レイアウト（生産計画表型）= 「機種名」と「タイトル」が左端の別々の行にある
+    const rowOf=lbl=>v.slice(0,20).findIndex(r=>(r||[]).slice(0,5).some(x=>String(x).trim()===lbl));
+    const ri=rowOf('機種名'),rt=rowOf('タイトル');
+    const isTransposed=ri>=0&&rt>=0&&ri!==rt;
     if(isTransposed){const s=_mdbFromSunDenshiRows(v,sh.name,'シート '+ssName+' / '+sh.name);st.added+=s.added;st.updated+=s.updated;return;}
     let hi=-1,col={};
     for(let i=0;i<Math.min(v.length,10)&&hi<0;i++){
@@ -351,7 +356,7 @@ function _mdbFromSheetValues(ssName,sheets){
     const bcol={};Object.keys(_SHEET_BOARDS).forEach(k=>{const i=hdr.findIndex(x=>_SHEET_BOARDS[k].includes(x));if(i>=0)bcol[k]=i;});
     for(let r=hi+1;r<v.length;r++){
       const row=v[r]||[];
-      const key=_mkey(row[col.code]); if(!key)continue;
+      const key=_ikey(row[col.code]); if(!key)continue;
       const extra={};hdr.forEach((h,i)=>{if(h&&row[i]!==''&&row[i]!=null&&Object.keys(extra).length<30)extra[h]=String(row[i]).slice(0,80);});
       const boards={};Object.keys(bcol).forEach(k=>{if(row[bcol[k]])boards[k]=String(row[bcol[k]]).trim();});
       _mdbMerge(key,{
@@ -360,6 +365,7 @@ function _mdbFromSheetValues(ssName,sheets){
         salesDate:col.salesDate!=null?_normDate(row[col.salesDate]):'',
         salesQty:col.salesQty!=null?String(row[col.salesQty]||'').trim():'',
         person:col.person!=null?String(row[col.person]||'').trim():'',
+        kind:col.kind!=null?(/スロ|回胴/.test(row[col.kind])?'スロット':/パチ|ぱち/.test(row[col.kind])?'パチンコ':''):'',
         boards,sheets:{[ssName+' / '+sh.name]:extra},
       },'シート '+ssName,st);
     }
@@ -376,7 +382,7 @@ function _sheetIdFrom(s){const m=String(s||'').match(/\/d\/([A-Za-z0-9_\-]{20,})
 function addDbSheet(){
   const v=prompt('スプレッドシートのURLまたはIDを入力してください');
   const id=_sheetIdFrom(v); if(!id)return;
-  _dbSheetList().push({id,label:'連携シート'+(_dbSheetList().length+1)});
+  _dbSheetList().push({id,label:'連携シート'+(_dbSheetList().length+1),customer:_importCust()});
   saveToGAS();_renderDbSheetBox();
 }
 function removeDbSheet(i){_dbSheetList().splice(i,1);saveToGAS();_renderDbSheetBox();}
@@ -389,7 +395,7 @@ function importDbSheets(){
   list.forEach(s=>{
     google.script.run.withSuccessHandler(res=>{
       try{const r=JSON.parse(res);
-        if(r.success){const st=_mdbFromSheetValues(r.name,r.sheets);tot.added+=st.added;tot.updated+=st.updated;s.label=r.name;s.lastAt=_todayStr();s.last=st.added+st.updated;}
+        if(r.success){window._impCust=s.customer||'fuji';const st=_mdbFromSheetValues(r.name,r.sheets);window._impCust=null;tot.added+=st.added;tot.updated+=st.updated;s.label=r.name;s.lastAt=_todayStr();s.last=st.added+st.updated;}
         else errs.push(s.label+': '+r.error);
       }catch(e){errs.push(s.label+': '+e.message);}
       if(++done===list.length)_finishSheets(tot,errs);
@@ -405,7 +411,7 @@ function _finishSheets(tot,errs){
 function _renderDbSheetBox(){
   const box=document.getElementById('dbsheet-box'); if(!box)return;
   box.innerHTML=_dbSheetList().map((s,i)=>`<div style="display:flex;gap:6px;align-items:center;font-size:12px;margin-bottom:4px;">
-    <span style="flex:1;">📊 ${_e7(s.label)} <span class="muted" style="font-size:10px;">${_e7(s.id.slice(0,10))}…${s.lastAt?` ／ 最終 ${_e7(s.lastAt)}（${s.last||0}件）`:''}</span></span>
+    <span style="flex:1;">📊 ${_e7(s.label)} <span class="pt-tag">${_e7(_custName(s.customer||'fuji'))}</span> <span class="muted" style="font-size:10px;">${_e7(s.id.slice(0,10))}…${s.lastAt?` ／ 最終 ${_e7(s.lastAt)}（${s.last||0}件）`:''}</span></span>
     <button class="btn btn-sm" onclick="removeDbSheet(${i})">削除</button></div>`).join('')
     +`<div style="display:flex;gap:6px;margin-top:6px;"><button class="btn btn-sm" onclick="addDbSheet()">＋ シート追加</button>
       <button class="btn btn-primary btn-sm" onclick="importDbSheets()">🔄 今すぐ読み込み</button></div>`;
@@ -417,18 +423,19 @@ function _afterMdbImport(){
 }
 
 /* ---------- 機種一覧用: 登録機種と機種DBの統合リスト ---------- */
-function _machineForKey(key){return MACHINES.find(m=>m.id===key||_mkey(m.id)===key)||null;}
+function _machineForKey(key){return MACHINES.find(m=>_machineKey(m)===key||(m.id===key&&_machineCust(m.id)==='fuji'))||null;}
 function _modelRows(scope){
   const rows=[];const used={};
-  MACHINES.forEach(m=>{const k=_mkey(m.id)||m.id;used[k]=1;rows.push({key:k,m,db:state.modelDB[k]||null});});
+  MACHINES.forEach(m=>{const k=_machineKey(m);used[k]=1;if(!_custMatch(_machineCust(m.id)))return;rows.push({key:k,m,db:state.modelDB[k]||null,cust:_machineCust(m.id)});});
   const cutoff=_addDays(_todayStr(),-120);
   Object.keys(state.modelDB).forEach(k=>{
     if(used[k])return;
+    if(!_custMatch(_keyCust(k)))return;
     const db=state.modelDB[k];
     const d=db.salesDate||(db.longlead||{}).deliveryDate||'';
     const cs=state.configSheets[k];
     if(scope!=='all'&&!(d&&d>=cutoff)&&!cs)return;
-    rows.push({key:k,m:null,db});
+    rows.push({key:k,m:null,db,cust:_keyCust(k)});
   });
   return rows;
 }
@@ -448,8 +455,9 @@ const CS_DEFAULT_RULES={
   sample:{base:'sampleImpl',offset:-30,fb:'salesDate',fbOffset:-120},
   mass:{base:'prodImpl',offset:-30,fb:'salesDate',fbOffset:-60},
 };
-function _csRules(){
-  const r=state.config.csRules||{};
+function _csRules(cid){
+  const by=state.config.csRulesBy||{};
+  const r=(cid&&by[cid])||state.config.csRules||{};
   const o={};CS_KINDS.forEach(x=>{o[x.k]=Object.assign({},CS_DEFAULT_RULES[x.k],r[x.k]||{});});
   return o;
 }
@@ -465,7 +473,7 @@ function _csRec(key,kind){
 }
 function _csPeek(key,kind){return ((state.configSheets[key]||{})[kind])||{};}
 function _csDue(key,kind){
-  const rule=_csRules()[kind];const b=_csBaseDates(key);
+  const rule=_csRules(_keyCust(key))[kind];const b=_csBaseDates(key);
   if(b[rule.base])return {due:_addDays(b[rule.base],+rule.offset),basis:CS_BASES[rule.base]};
   if(rule.fb&&b[rule.fb])return {due:_addDays(b[rule.fb],+rule.fbOffset),basis:CS_BASES[rule.fb]};
   return {due:'',basis:''};
@@ -497,6 +505,7 @@ function _csChips(key){
 function _csTodo(){
   const t=[];
   _modelRows('active').forEach(r=>CS_KINDS.forEach(x=>{
+    if(!r)return;
     const s=_csState(r.key,x.k);
     if(s.label==='依頼期限超過'||s.label==='要依頼')t.push({key:r.key,kind:x,s});
   }));
@@ -508,7 +517,7 @@ function _csRowsData(){
   return _modelRows(_csScope).map(r=>{
     const db=r.db||{};
     const cs=CS_KINDS.map(x=>({x,s:_csState(r.key,x.k)}));
-    return {key:r.key,m:r.m,db,kind:typeof _rowKind==='function'?_rowKind(r):(db.kind||'その他'),title:db.title||'',
+    return {key:r.key,cust:r.cust||'fuji',m:r.m,db,kind:typeof _rowKind==='function'?_rowKind(r):(db.kind||'その他'),title:db.title||'',
       person:(r.m&&r.m.person)||db.person||'',sales:db.salesDate||(db.longlead||{}).deliveryDate||'',agg:db.aggDate||'',cs,
       soon:cs.some(c=>c.s.label==='依頼期限超過'||c.s.label==='要依頼'),
       open:cs.some(c=>!c.s.rec.got&&c.s.label!=='対象外（販売済）'),
@@ -517,20 +526,23 @@ function _csRowsData(){
 }
 function renderConfigSheets(){
   if(!_mdbLoadStarted)_loadModelDB();
-  const rules=_csRules();
+  const rules=_csRules(_curCust()==='all'?null:_curCust());
   const term=_csTerm.trim().toLowerCase();
+  const showC=_curCust()==='all';
   const all=_csRowsData().filter(d=>(!term||(d.key+' '+d.title+' '+d.person).toLowerCase().includes(term))&&(!_csKind||d.kind===_csKind));
   const pass=d=>_csFilter==='soon'?d.soon:_csFilter==='open'?d.open:_csFilter==='done'?d.done:true;
   const kinds=['パチンコ','スロット','その他'];
   const firstDue=d=>d.cs.map(c=>(c.s.rec.got||c.s.rec.req||c.s.label==='対象外（販売済）')?'9999':(c.s.due||'9998')).sort()[0];
-  const list=all.filter(pass).sort((a,b)=>kinds.indexOf(a.kind)-kinds.indexOf(b.kind)||firstDue(a).localeCompare(firstDue(b))||a.key.localeCompare(b.key));
+  const corder=c=>_customers().findIndex(x=>x.id===c);
+  const list=all.filter(pass).sort((a,b)=>(showC?corder(a.cust)-corder(b.cust):0)||kinds.indexOf(a.kind)-kinds.indexOf(b.kind)||firstDue(a).localeCompare(firstDue(b))||a.key.localeCompare(b.key));
   window._csList=list;
   const fmt=v=>v?_e7(String(v).replace(/-/g,'/')):'<span class="same">—</span>';
-  const COLS=5+CS_KINDS.length*4;
+  const COLS=5+(showC?1:0)+CS_KINDS.length*4;
+  const secOf=d=>(showC?_custName(d.cust)+' ／ ':'')+d.kind;
   let body='',last='';
   list.forEach(d=>{
-    if(d.kind!==last){last=d.kind;body+=`<tr class="pt-sec"><td colspan="${COLS}">■ ${_e7(d.kind)}（${list.filter(x=>x.kind===d.kind).length}機種）</td></tr>`;}
-    body+=`<tr><td class="name" style="cursor:pointer;" onclick="openModelInfo('${_e7(d.key)}')">${_e7(d.key)}${d.m?'<span class="pt-tag">登録</span>':''}</td>
+    if(secOf(d)!==last){last=secOf(d);body+=`<tr class="pt-sec"><td colspan="${COLS}">■ ${_e7(last)}（${list.filter(x=>secOf(x)===last).length}機種）</td></tr>`;}
+    body+=`<tr><td class="name" style="cursor:pointer;" onclick="openModelInfo('${_e7(d.key)}')">${_e7(_dispKey(d.key))}${d.m?'<span class="pt-tag">登録</span>':''}</td>${showC?`<td>${_e7(_custName(d.cust))}</td>`:''}
       <td class="spec" title="${_e7(d.title)}">${_e7(d.title)||'<span class="same">—</span>'}</td>
       <td>${_e7(d.person)||'<span class="same">—</span>'}</td>
       <td class="c">${fmt(d.sales)}</td><td class="c">${fmt(d.agg)}</td>
@@ -564,28 +576,31 @@ function renderConfigSheets(){
     </div>
     <div class="pt-info">${list.length}機種。黄色が依頼期限（生産計画の日付から自動計算）。セルをクリックすると依頼日・取得日・構成表URLを登録できます。販売済みの機種は記録が無ければ「対象外」です。</div>
     <div class="pt-wrap" id="cs-pt"><table class="pt"><thead>
-      <tr><th rowspan="2">機種</th><th rowspan="2">タイトル</th><th rowspan="2">担当</th><th colspan="2">生産計画</th>
+      <tr><th rowspan="2">機種</th>${showC?'<th rowspan="2">得意先</th>':''}<th rowspan="2">タイトル</th><th rowspan="2">担当</th><th colspan="2">生産計画</th>
         ${CS_KINDS.map(x=>`<th colspan="4">${x.label} 構成表</th>`).join('')}</tr>
       <tr><th>販売時期</th><th>部品集約</th>${CS_KINDS.map(()=>`<th>状態</th><th class="pt-cur">依頼期限</th><th>依頼日</th><th>取得日</th>`).join('')}</tr>
     </thead><tbody>${body||`<tr><td colspan="${COLS}" class="c same" style="padding:20px;">該当する機種がありません（生産計画Excel等を取り込むと表示されます）</td></tr>`}</tbody></table></div>
-    <details style="margin-top:12px;"><summary style="cursor:pointer;font-size:13px;font-weight:700;padding:8px 12px;background:#fff;border:1px solid var(--border-light);border-radius:8px;">⚙️ 依頼期限の計算ルール</summary>
+    <details style="margin-top:12px;"><summary style="cursor:pointer;font-size:13px;font-weight:700;padding:8px 12px;background:#fff;border:1px solid var(--border-light);border-radius:8px;">⚙️ 依頼期限の計算ルール（${_curCust()==='all'?'全社共通':_e7(_custName(_curCust()))}）</summary>
       <div class="pt-info" style="margin-top:8px;">基準日の「N日前」に依頼する場合はマイナスで入力。基準日が無い機種は「代替」を使います。</div>
       <div class="pt-wrap" style="max-height:none;"><table class="pt"><thead><tr><th>構成表</th><th>基準日</th><th>代替（基準日が無い場合）</th></tr></thead><tbody>${CS_KINDS.map(ruleRow).join('')}</tbody></table></div>
       <div style="margin-top:8px;"><button class="btn btn-primary btn-sm" onclick="saveCsRules()">💾 ルールを保存</button>
-        <button class="btn btn-sm" onclick="state.config.csRules={};saveToGAS();renderConfigSheets();">初期値に戻す</button></div>
+        <button class="btn btn-sm" onclick="if(_curCust()==='all')state.config.csRules={};else if(state.config.csRulesBy)delete state.config.csRulesBy[_curCust()];saveToGAS();renderConfigSheets();">初期値に戻す</button></div>
     </details>`;
 }
 function _csCsv(){
   const h=['区分','機種','登録','タイトル','担当','販売時期','部品集約'];
   CS_KINDS.forEach(x=>h.push(x.label+' 状態',x.label+' 依頼期限',x.label+' 依頼日',x.label+' 取得日',x.label+' URL'));
-  _ptCsvDownload('構成表一覧',h,(window._csList||[]).map(d=>[d.kind,d.key,d.m?'登録':'',d.title,d.person,d.sales,d.agg]
+  h.splice(1,0,'得意先');
+  _ptCsvDownload('構成表一覧',h,(window._csList||[]).map(d=>[d.kind,_custName(d.cust),_dispKey(d.key),d.m?'登録':'',d.title,d.person,d.sales,d.agg]
     .concat(...d.cs.map(c=>[c.s.label,c.s.due,c.s.rec.req||'',c.s.rec.got||'',c.s.rec.url||'']))));
 }
 function saveCsRules(){
   const o={};
   CS_KINDS.forEach(x=>{o[x.k]={base:document.getElementById(`csr-${x.k}-base`).value,offset:parseInt(document.getElementById(`csr-${x.k}-offset`).value,10)||0,
     fb:document.getElementById(`csr-${x.k}-fb`).value,fbOffset:parseInt(document.getElementById(`csr-${x.k}-fbOffset`).value,10)||0};});
-  state.config.csRules=o;saveToGAS();showToast('✅ 依頼期限ルールを保存しました');renderConfigSheets();
+  const cur=_curCust();
+  if(cur==='all')state.config.csRules=o;else{state.config.csRulesBy=state.config.csRulesBy||{};state.config.csRulesBy[cur]=o;}
+  saveToGAS();showToast(`✅ 依頼期限ルールを保存しました（${cur==='all'?'全社共通':_custName(cur)}）`);renderConfigSheets();
 }
 function _overlay(id,title,body,width){
   const old=document.getElementById(id);if(old)old.remove();
@@ -600,7 +615,7 @@ function _overlay(id,title,body,width){
 function openCsEditor(key,kind){
   const x=CS_KINDS.find(k=>k.k===kind);const s=_csState(key,kind);const r=s.rec;
   const inp=(id,type,v,ph)=>`<input id="cse-${id}" type="${type}" value="${_e7(v||'')}" placeholder="${ph||''}" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;box-sizing:border-box;">`;
-  _overlay('cs-editor',`📑 ${_e7(key)} — ${x.label} 構成表`,`
+  _overlay('cs-editor',`📑 ${_e7(_dispKey(key))}（${_e7(_custName(_keyCust(key)))}）— ${x.label} 構成表`,`
     <div style="font-size:12px;margin-bottom:10px;">状態: <span class="st ${s.cls}">${_e7(s.label)}</span>
       ${s.due?`　依頼期限: <strong>${_e7(s.due)}</strong> <span class="muted">（${_e7(s.basis)}基準）</span>`:'　<span class="muted">依頼期限: 基準日が未取込</span>'}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
@@ -633,7 +648,7 @@ function openModelInfo(key){
   const kv=(o,map)=>Object.keys(o||{}).filter(k=>o[k]).map(k=>`<tr><td class="muted" style="width:40%;">${_e7(map&&map[k]||k)}</td><td>${_e7(o[k])}</td></tr>`).join('');
   const hwMap={};Object.entries(_HW_LABELS).forEach(([l,f])=>hwMap[f]=l);Object.assign(hwMap,{abbr:'型式略号',orient:'液晶向き',version:'一覧表版'});
   const sec=(t,html)=>html?`<div style="font-weight:700;font-size:13px;margin:12px 0 4px;">${t}</div><table style="font-size:12px;">${html}</table>`:'';
-  _overlay('model-info',`🗂 ${_e7(key)} ${_e7(db.title||'')}`,`
+  _overlay('model-info',`🗂 ${_e7(_dispKey(key))} ${_e7(db.title||'')}　<span style="font-size:11px;opacity:.8;">${_e7(_custName(_keyCust(key)))}</span>`,`
     ${m?`<button class="btn btn-sm" onclick="document.getElementById('model-info').remove();openDetailModal('machine','${_e7(m.id)}')">📇 登録機種の詳細を開く</button>`:''}
     ${sec('基本情報',kv({kind:db.kind,brand:db.brand,series:db.series,person:db.person},{kind:'種別',brand:'販売ブランド',series:'シリーズ',person:'担当'}))}
     ${sec('生産計画（Excel）',kv({salesDate:db.salesDate,aggDate:db.aggDate,targetQty:db.targetQty,salesQty:db.salesQty,planChange:db.planChange},{salesDate:'販売時期',aggDate:'部品集約時期',targetQty:'調達目標台数',salesQty:'販売台数',planChange:'前回からの変更'}))}

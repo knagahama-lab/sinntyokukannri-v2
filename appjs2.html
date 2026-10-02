@@ -181,6 +181,7 @@ function openEditModal(id){
   const ex=_getExtra(id);
   document.getElementById('edit-modal-title').textContent=`${id} — 編集`;
   document.getElementById('edit-status').value=state.statuses[id]||'量産前';
+  {const cs=document.getElementById('edit-customer');if(cs&&typeof _custOptions==='function')cs.innerHTML=_custOptions(_machineCust(id));}
   document.getElementById('edit-qty').value=m?m.prodQty:'';
   document.getElementById('edit-person').value=m?m.person:'';
   document.getElementById('edit-compliance').value=m?m.compliance||'':'';
@@ -272,6 +273,7 @@ function saveEditModal(){
   const m=MACHINES.find(x=>x.id===id);
   const ex=_getExtra(id);
   state.statuses[id]=document.getElementById('edit-status').value;
+  {const cs=document.getElementById('edit-customer');if(cs&&cs.value)ex.customer=cs.value;}
   if(m){
     m.prodQty=document.getElementById('edit-qty').value;
     m.person=document.getElementById('edit-person').value;
@@ -308,6 +310,7 @@ function openAddMachineModal(){
     const el=document.getElementById(id);if(el)el.value='';
   });
   document.getElementById('add-status').value='量産前';
+  {const cs=document.getElementById('add-customer');if(cs&&typeof _custOptions==='function')cs.innerHTML=_custOptions(_importCust());}
   document.getElementById('add-machine-modal').classList.add('open');
 }
 function closeAddMachineModal(){document.getElementById('add-machine-modal').classList.remove('open');}
@@ -330,6 +333,7 @@ function saveAddMachineModal(){
     notes:document.getElementById('add-notes').value.trim(),
   };
   MACHINES.push(newM);
+  {const cs=document.getElementById('add-customer');if(cs&&cs.value)_getExtra(id).customer=cs.value;}
   state.statuses[id]=document.getElementById('add-status').value;
   state.schedules[id]={
     sampleImpl:newM.sampleImpl,sampleAssy:newM.sampleAssy,sampleShip:newM.sampleShip,

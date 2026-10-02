@@ -1,0 +1,139 @@
+<script>
+/* ============================================================
+   得意先（顧客）対応
+   藤商事に加え、コナミアミューズメント・エキサイト等の他社を扱う。
+   ・得意先マスタ: state.config.customers [{id,name,kw:[宛先照合キーワード]}]
+   ・表示中の得意先: ブラウザごとに記憶（localStorage）。all = すべて
+   ・機種DBのキー: 藤商事は従来どおり機種コードのみ、他社は「得意先ID:機種コード」
+     （他社で同じ機種コードがあっても衝突しない）
+   ・登録機種の得意先: state.machineExtra[機種].customer（未設定=藤商事）
+   ※ このファイルの文字列にスラッシュ2つやスラッシュ+アスタリスクを書かないこと
+============================================================ */
+const DEFAULT_CUSTOMERS=[
+  {id:'fuji',name:'藤商事',kw:['藤商事']},
+  {id:'konami',name:'コナミアミューズメント',kw:['コナミ','KONAMI','Konami']},
+  {id:'excite',name:'エキサイト',kw:['エキサイト','EXCITE','Excite']},
+];
+function _e8(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function _customers(){
+  if(!Array.isArray(state.config.customers)||!state.config.customers.length)state.config.customers=JSON.parse(JSON.stringify(DEFAULT_CUSTOMERS));
+  return state.config.customers;
+}
+function _cust(id){return _customers().find(c=>c.id===id)||{id:id||'fuji',name:id||'藤商事',kw:[id||'藤商事']};}
+function _custName(id){return _cust(id).name;}
+function _curCust(){try{return localStorage.getItem('curCustomer')||'all';}catch(e){return 'all';}}
+function _custMatch(cid){const c=_curCust();return c==='all'||c===(cid||'fuji');}
+// 取り込み先の得意先（取込画面で選択。未選択なら表示中の得意先、すべて表示中なら藤商事）
+function _importCust(){
+  if(window._impCust)return window._impCust;
+  const c=_curCust();return c==='all'?'fuji':c;
+}
+function _ikey(raw,cid){
+  const k=_mkey(raw); if(!k)return '';
+  cid=cid||_importCust();
+  return cid==='fuji'?k:cid+':'+k;
+}
+function _keyCust(key){
+  const i=String(key).indexOf(':');
+  if(i>0){const p=key.slice(0,i);if(_customers().some(c=>c.id===p))return p;}
+  const db=state.modelDB[key];return (db&&db.customer)||'fuji';
+}
+function _dispKey(key){
+  const i=String(key).indexOf(':');
+  return i>0&&_customers().some(c=>c.id===key.slice(0,i))?key.slice(i+1):key;
+}
+function _machineCust(id){const ex=state.machineExtra&&state.machineExtra[id];return (ex&&ex.customer)||'fuji';}
+function _machineKey(m){const c=_machineCust(m.id);const k=_mkey(m.id)||m.id;return c==='fuji'?k:c+':'+k;}
+function _custMachines(){return MACHINES.filter(m=>_custMatch(_machineCust(m.id)));}
+
+/* ---------- 上部の得意先セレクタ ---------- */
+function _renderCustSelect(){
+  const sel=document.getElementById('cust-select'); if(!sel)return;
+  const cur=_curCust();
+  sel.innerHTML=`<option value="all"${cur==='all'?' selected':''}>🏢 すべての得意先</option>`
+    +_customers().map(c=>`<option value="${_e8(c.id)}"${cur===c.id?' selected':''}>🏢 ${_e8(c.name)}</option>`).join('')
+    +'<option disabled>──────────</option><option value="__add">＋ 得意先を追加…</option><option value="__manage">⚙ 得意先の管理…</option>';
+}
+function setCurrentCustomer(v){
+  if(v==='__add'){addCustomer();_renderCustSelect();return;}
+  if(v==='__manage'){openCustomerManager();_renderCustSelect();return;}
+  try{localStorage.setItem('curCustomer',v);}catch(e){}
+  window._impCust=null;
+  _renderCustSelect();
+  renderPage(currentPage);
+}
+function _newCustId(name){
+  let base=String(name).replace(/株式会社|\(株\)|（株）/g,'').trim();
+  let id='c'+Date.now().toString(36);
+  if(/^[A-Za-z0-9]+$/.test(base))id=base.toLowerCase().slice(0,12);
+  while(_customers().some(c=>c.id===id))id+='x';
+  return id;
+}
+function addCustomer(){
+  const name=(prompt('追加する得意先名を入力してください（例: 大一商会）')||'').trim();
+  if(!name)return;
+  if(_customers().some(c=>c.name===name)){showToast('⚠️ 既に登録されています');return;}
+  const c={id:_newCustId(name),name,kw:[name.replace(/株式会社|\(株\)|（株）/g,'').trim()]};
+  _customers().push(c);
+  addLog(`🏢 得意先を追加: ${name}`);saveToGAS();
+  try{localStorage.setItem('curCustomer',c.id);}catch(e){}
+  showToast(`✅ 得意先「${name}」を追加しました`);
+  renderPage(currentPage);
+}
+function _custUsage(id){
+  const m=MACHINES.filter(x=>_machineCust(x.id)===id).length;
+  const d=Object.keys(state.modelDB||{}).filter(k=>_keyCust(k)===id).length;
+  return {m,d};
+}
+function openCustomerManager(){
+  const rows=_customers().map((c,i)=>{const u=_custUsage(c.id);return `<tr>
+    <td><input id="cm-name-${i}" value="${_e8(c.name)}" style="width:100%;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></td>
+    <td><input id="cm-kw-${i}" value="${_e8((c.kw||[]).join(','))}" style="width:100%;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;"></td>
+    <td class="num" style="font-weight:500;">${u.m} ／ ${u.d}</td>
+    <td class="c">${c.id==='fuji'||u.m||u.d?'<span class="pt-muted">—</span>':`<button class="btn btn-sm" onclick="removeCustomer(${i})">削除</button>`}</td></tr>`;}).join('');
+  _overlay('cust-manager','🏢 得意先の管理',`
+    <div class="pt-info">「宛先キーワード」は見積管理の宛先と照合して、見積書・注文書を得意先ごとに振り分けるのに使います（カンマ区切り）。</div>
+    <div class="pt-wrap" style="max-height:none;"><table class="pt"><thead><tr><th>得意先名</th><th>宛先キーワード</th><th>登録機種／機種DB</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <div style="display:flex;gap:6px;margin-top:12px;"><button class="btn btn-sm" onclick="document.getElementById('cust-manager').remove();addCustomer();">＋ 得意先を追加</button>
+      <span style="flex:1;"></span><button class="btn btn-primary btn-sm" onclick="saveCustomerManager()">保存</button></div>`,640);
+}
+function saveCustomerManager(){
+  _customers().forEach((c,i)=>{
+    const n=document.getElementById('cm-name-'+i),k=document.getElementById('cm-kw-'+i);
+    if(n&&n.value.trim())c.name=n.value.trim();
+    if(k)c.kw=k.value.split(/[,、]/).map(s=>s.trim()).filter(Boolean);
+  });
+  saveToGAS();addLog('🏢 得意先マスタを更新');
+  const ov=document.getElementById('cust-manager');if(ov)ov.remove();
+  _renderCustSelect();renderPage(currentPage);showToast('✅ 得意先を保存しました');
+}
+function removeCustomer(i){
+  const c=_customers()[i];if(!c)return;
+  if(!confirm(`得意先「${c.name}」を削除しますか？`))return;
+  _customers().splice(i,1);saveToGAS();
+  if(_curCust()===c.id){try{localStorage.setItem('curCustomer','all');}catch(e){}}
+  openCustomerManager();_renderCustSelect();
+}
+function _custOptions(sel){return _customers().map(c=>`<option value="${_e8(c.id)}"${c.id===sel?' selected':''}>${_e8(c.name)}</option>`).join('');}
+
+/* ---------- 見積・注文の振り分け（appjs1 の同名関数を置き換え） ---------- */
+// 宛先が別の得意先のキーワードに一致する見積は、その機種に紐づけない
+function getEstimatesForMachine(machineId){
+  if(!state.linkageData)return[];
+  const all=(state.linkageData.estimates||state.linkageData.quotes||[]);
+  const mid=String(machineId).trim().toUpperCase();
+  const mine=_machineCust(machineId);
+  return all.filter(e=>{
+    const eid=String(e.id||e.machineId||'').trim().toUpperCase();
+    if(!(eid===mid||eid.startsWith(mid)||mid.startsWith(eid)))return false;
+    const ec=String(e.customer||e.client||'');
+    if(!ec)return true;
+    const owner=_customers().find(c=>(c.kw&&c.kw.length?c.kw:[c.name]).some(k=>k&&ec.includes(k)));
+    return !owner||owner.id===mine;
+  });
+}
+
+// 起動時: セレクタを描画
+_renderCustSelect();
+</script>

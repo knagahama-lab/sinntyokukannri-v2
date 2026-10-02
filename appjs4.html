@@ -221,6 +221,7 @@ function _archiveImportFile(file,category,source){
   if(typeof google==='undefined'||!google.script)return;
   if(file.size>40*1024*1024){showToast('⚠️ 40MBを超えるためDrive保存をスキップしました');return;}
   const cat=category||_guessArchiveCategory(file.name);
+  const cid=typeof _importCust==='function'?_importCust():'fuji';
   const reader=new FileReader();
   reader.onload=ev=>{
     const base64=ev.target.result.split(',')[1];
@@ -231,7 +232,7 @@ function _archiveImportFile(file,category,source){
         if(!state.importArchive.some(a=>a.fileId===r.fileId)){
           state.importArchive.unshift({
             id:'arc_'+Date.now(),category:cat,fileName:r.fileName,fileId:r.fileId,url:r.url,
-            folderUrl:r.folderUrl||'',docDate:_guessArchiveDocDate(r.fileName),
+            folderUrl:r.folderUrl||'',docDate:_guessArchiveDocDate(r.fileName),customer:cid,
             uploadedAt:r.uploadedAt,source:source||'',
           });
           addLog(`📁 取込資料をDrive保存: ${r.fileName}`);
@@ -242,7 +243,7 @@ function _archiveImportFile(file,category,source){
         if(box)box.innerHTML=_renderImportArchiveList();
       })
       .withFailureHandler(err=>showToast('⚠️ Drive保存失敗: '+err.message))
-      .archiveImportFile(file.name,base64,file.type||'application/octet-stream',cat);
+      .archiveImportFile(file.name,base64,file.type||'application/octet-stream',cat,cid==='fuji'?'':_custName(cid));
   };
   reader.readAsDataURL(file);
 }

@@ -109,7 +109,7 @@ function getPriceImpactData() {
  * 書かない(例: 'image/'+'*' のように分割する)。
  */
 function getAppBundle() {
-  var files = ['appjs1', 'appjs2', 'appjs3', 'appjs4', 'appjs5', 'appjs6', 'appjs7'];
+  var files = ['appjs1', 'appjs2', 'appjs3', 'appjs4', 'appjs5', 'appjs6', 'appjs7', 'appjs8'];
   var code = files.map(function(name) {
     var raw = HtmlService.createHtmlOutputFromFile(name).getContent();
     // 各ファイルは HtmlService.createHtmlOutputFromFile() が
@@ -558,15 +558,22 @@ function _fmtCellDate(v) {
    ※ CONFIDENTIAL資料を含むため、uploadFileToDrive() と違い
      「リンクを知っている全員」への共有設定は行わない（フォルダ権限を継承）。
 ============================================================ */
-function archiveImportFile(fileName, base64Data, mimeType, category) {
+function archiveImportFile(fileName, base64Data, mimeType, category, customer) {
   try {
     var ROOT_NAME = '営業進捗管理_取込資料';
     var roots = DriveApp.getFoldersByName(ROOT_NAME);
     var rootFolder = roots.hasNext() ? roots.next() : DriveApp.createFolder(ROOT_NAME);
 
+    // 得意先ごとのフォルダ（未指定なら従来どおり直下）
+    var parent = rootFolder;
+    if (customer) {
+      var cn = String(customer).replace(/[\\\/:?"<>|]/g, '_');
+      var cf = rootFolder.getFoldersByName(cn);
+      parent = cf.hasNext() ? cf.next() : rootFolder.createFolder(cn);
+    }
     var catName = String(category || 'その他お客様資料').replace(/[\\\/:?"<>|]/g, '_');
-    var cats = rootFolder.getFoldersByName(catName);
-    var catFolder = cats.hasNext() ? cats.next() : rootFolder.createFolder(catName);
+    var cats = parent.getFoldersByName(catName);
+    var catFolder = cats.hasNext() ? cats.next() : parent.createFolder(catName);
 
     var bytes = Utilities.base64Decode(base64Data);
 

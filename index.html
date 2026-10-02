@@ -52,10 +52,11 @@
     <div id="topbar">
       <div>
         <div class="topbar-title" id="topbar-title">機種一覧</div>
-        <div class="topbar-sub">遊技機 基板・エコ進捗管理 <span style="color:#dc2626;font-weight:700;">[build:v2-db2]</span></div>
+        <div class="topbar-sub">遊技機 基板・エコ進捗管理 <span style="color:#dc2626;font-weight:700;">[build:v2-cust1]</span></div>
       </div>
       <div class="topbar-spacer"></div>
       <div class="topbar-actions">
+        <select id="cust-select" class="pt-in" style="font-weight:700;padding:5px 8px;" onchange="setCurrentCustomer(this.value)"></select>
         <button class="btn btn-sm" onclick="document.getElementById('excel-file-topbar').click()">📥 サン電子生産計画表 取込</button>
         <input type="file" id="excel-file-topbar" accept=".xlsx,.xls" style="display:none" onchange="handleExcelImport(event)">
         <div class="export-wrap">
@@ -436,6 +437,9 @@
       <!-- 基本情報 -->
       <div style="font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px;">基本情報</div>
       <div class="form-row">
+        <div class="form-field"><label>得意先</label><select id="edit-customer"></select></div>
+      </div>
+      <div class="form-row">
         <div class="form-field"><label>ステータス</label><select id="edit-status"><option>量産前</option><option>量産中</option><option>量産終了</option></select></div>
         <div class="form-field"><label>量産台数</label><input type="text" id="edit-qty"></div>
       </div>
@@ -550,6 +554,9 @@
   <div class="modal">
     <div class="modal-head"><h3>新規機種追加</h3><button class="modal-close" onclick="closeAddMachineModal()">✕</button></div>
     <div class="modal-body">
+      <div class="form-row">
+        <div class="form-field"><label>得意先</label><select id="add-customer"></select></div>
+      </div>
       <div class="form-row">
         <div class="form-field"><label>機種名 (ID) *</label><input type="text" id="add-id" placeholder="例: F01"></div>
         <div class="form-field"><label>担当者</label><input type="text" id="add-person"></div>
@@ -713,5 +720,6 @@
 <?!= include('appjs5'); ?>
 <?!= include('appjs6'); ?>
 <?!= include('appjs7'); ?>
+<?!= include('appjs8'); ?>
 </body>
 </html>

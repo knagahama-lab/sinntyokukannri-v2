@@ -11,6 +11,12 @@ function doGet(e) {
     var info = {};
     try {
       var props = PropertiesService.getScriptProperties();
+      // このスクリプトがスプレッドシートに紐づいている（コンテナバインド）場合はその場所
+      try {
+        var cont = SpreadsheetApp.getActiveSpreadsheet();
+        info.containerSpreadsheet = cont ? { name: cont.getName(), url: cont.getUrl(), sheets: cont.getSheets().map(function(s){ return s.getName(); }) } : null;
+      } catch (eC) { info.containerSpreadsheet = 'なし（' + eC.message + '）'; }
+      info.modelDbFileId = props.getProperty('modelDbFileId') || '';
       info.orderSync_spreadsheetId = props.getProperty('orderSync_spreadsheetId');
       info.orderSync_sheetName = props.getProperty('orderSync_sheetName');
       // ids=ID1,ID2,... で複数シートを一括調査。rows=先頭何行を返すか(既定8, 最大20)

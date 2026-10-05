@@ -333,7 +333,8 @@ function openImportModal(){
       </div>
       <div class="imp-card" style="margin-top:12px;flex-direction:row;align-items:center;justify-content:space-between;">
         <div><div class="imp-t">📤 スプレッドシートへ書き出し</div><div class="muted" style="font-size:11px;">機種DB・登録機種・構成表・取込履歴・得意先を「DB_」シートに書き出します</div></div>
-        <button class="btn btn-primary btn-sm" onclick="_syncToSheet(this)">書き出す</button></div>
+        <div style="display:flex;gap:6px;"><button class="btn btn-sm" onclick="_syncFromSheet(this)">シートから反映</button>
+        <button class="btn btn-primary btn-sm" onclick="_syncToSheet(this)">書き出す</button></div></div>
       <div class="imp-card" style="margin-top:12px;"><div class="imp-t">3. 連携スプレッドシート（機種DBへ取込）</div>
         <div id="dbsheet-box" style="width:100%;"></div></div>
       <div class="muted" style="font-size:11px;margin:8px 0 14px;">取り込んだデータは機種コード単位で「機種DB」に統合され、機種一覧・構成表に反映されます。原本はDrive「営業進捗管理_取込資料」に自動保存されます。</div>
@@ -386,6 +387,21 @@ function _syncToSheet(btn){
     })
     .withFailureHandler(err=>{if(btn){btn.disabled=false;btn.textContent='書き出す';}showToast('⚠️ 書き出し失敗: '+err.message,6000);})
     .syncToSpreadsheet();
+}
+function _syncFromSheet(btn){
+  if(typeof google==='undefined'||!google.script){showToast('⚠️ GAS環境でのみ実行できます');return;}
+  if(btn){btn.disabled=true;btn.textContent='反映中...';}
+  google.script.run
+    .withSuccessHandler(res=>{
+      if(btn){btn.disabled=false;btn.textContent='シートから反映';}
+      let r;try{r=JSON.parse(res);}catch(e){showToast('⚠️ 結果を読み取れませんでした');return;}
+      if(!r.success){showToast('⚠️ '+r.error,6000);return;}
+      if(!r.changed.length){showToast('変更はありませんでした');return;}
+      showToast('✅ シートから反映: '+r.changed.join(' / ')+'（画面を再読み込みします）',4000);
+      setTimeout(()=>location.reload(),1500);
+    })
+    .withFailureHandler(err=>{if(btn){btn.disabled=false;btn.textContent='シートから反映';}showToast('⚠️ 反映失敗: '+err.message,6000);})
+    .syncFromSpreadsheet();
 }
 function closeImportModal(){const m=document.getElementById('import-modal');if(m)m.remove();}
 </script>

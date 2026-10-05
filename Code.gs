@@ -156,6 +156,29 @@ function loadData() {
 }
 
 function saveData(stateJson) {
+  // スプレッドシート側で変更された機種を、それより前に画面を開いた人の保存で
+  // 古い値に戻さないよう、最新のシート反映分を引き継いでから保存する
+  try {
+    var inc = JSON.parse(stateJson);
+    var curJson = PropertiesService.getScriptProperties().getProperty('sinntyoku_state');
+    var cur = curJson ? JSON.parse(curJson) : null;
+    var cc = (cur && cur.config) || {}, ic = (inc && inc.config) || {};
+    if (cc.lastSheetImportAt && cc.lastSheetImportAt !== ic.lastSheetImportAt && Array.isArray(cc.sheetChangedIds)) {
+      ['statuses', 'machineFields', 'schedules', 'notes'].forEach(function(k) {
+        inc[k] = inc[k] || {};
+        cc.sheetChangedIds.forEach(function(id) { if (cur[k] && cur[k][id] !== undefined) inc[k][id] = cur[k][id]; });
+      });
+      inc.machineExtra = inc.machineExtra || {};
+      cc.sheetChangedIds.forEach(function(id) {
+        var c = cur.machineExtra && cur.machineExtra[id];
+        if (c && c.customer) { inc.machineExtra[id] = inc.machineExtra[id] || {}; inc.machineExtra[id].customer = c.customer; }
+      });
+      inc.config = inc.config || {};
+      inc.config.lastSheetImportAt = cc.lastSheetImportAt;
+      inc.config.sheetChangedIds = cc.sheetChangedIds;
+      stateJson = JSON.stringify(inc);
+    }
+  } catch (e) { Logger.log('saveData merge: ' + e.message); }
   PropertiesService.getScriptProperties().setProperty('sinntyoku_state', stateJson);
 }
 
@@ -722,6 +745,89 @@ function _writeDbSheet(ss, name, headers, rows, now) {
   sh.setFrozenRows(1);
   sh.getRange(1, headers.length + 2).setValue('最終更新: ' + now);
   return rows.length;
+}
+
+/* ============================================================
+   スプレッドシート → システム への反映（DB_登録機種 の編集を取り込む）
+   【手動で反映】 syncFromSpreadsheet
+   【編集したら自動で反映】 setupSheetEditTrigger を一度だけ実行
+   対象列: 得意先・担当・ステータス・量産台数・適合・ROM・見本機/量産の日程・備考
+   （機種・使用基板の列は参照用。変更しても反映しない）
+============================================================ */
+function syncFromSpreadsheet() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var ss = SpreadsheetApp.openById(props.getProperty('dbSpreadsheetId') || DB_SPREADSHEET_ID_DEFAULT);
+    var sh = ss.getSheetByName('DB_登録機種');
+    if (!sh) return JSON.stringify({ success: false, error: 'DB_登録機種 シートがありません。先に syncToSpreadsheet を実行してください。' });
+    var v = sh.getDataRange().getDisplayValues();
+    if (v.length < 2) return JSON.stringify({ success: true, changed: [] });
+    var hdr = v[0].map(function(h) { return String(h).trim(); });
+    var col = function(name) { return hdr.indexOf(name); };
+    var state = {}; try { state = JSON.parse(loadData() || '{}'); } catch (e) {}
+    ['statuses', 'schedules', 'machineFields', 'notes', 'machineExtra'].forEach(function(k) { state[k] = state[k] || {}; });
+    var custs = (state.config && state.config.customers) || [];
+    var custId = function(name) {
+      name = String(name || '').trim(); if (!name) return '';
+      for (var i = 0; i < custs.length; i++) if (custs[i].name === name || custs[i].id === name) return custs[i].id;
+      return name === '藤商事' ? 'fuji' : name === 'コナミアミューズメント' ? 'konami' : name === 'エキサイト' ? 'excite' : '';
+    };
+    var normDate = function(s) {
+      s = String(s || '').trim(); if (!s) return null;
+      var m = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+      return m ? m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2) : s;
+    };
+    var SCH = [['見本機実装', 'sampleImpl'], ['見本機組立', 'sampleAssy'], ['見本機出荷', 'sampleShip'], ['量産実装', 'prodImpl'], ['量産組立', 'prodAssy'], ['量産出荷', 'prodShip']];
+    var FLD = [['担当', 'person'], ['量産台数', 'prodQty'], ['適合', 'compliance'], ['ROM', 'rom']];
+    var changed = [], changedIds = [];
+    for (var r = 1; r < v.length; r++) {
+      var row = v[r], id = String(row[col('機種')] || '').trim();
+      if (!id) continue;
+      var diffs = [];
+      var st = col('ステータス') >= 0 ? String(row[col('ステータス')]).trim() : '';
+      if (st && state.statuses[id] !== st) { diffs.push('ステータス ' + (state.statuses[id] || '—') + '→' + st); state.statuses[id] = st; }
+      var f = state.machineFields[id] = state.machineFields[id] || {};
+      FLD.forEach(function(p) { var i = col(p[0]); if (i < 0) return; var nv = String(row[i]).trim(); if ((f[p[1]] || '') !== nv) { diffs.push(p[0]); f[p[1]] = nv; } });
+      var s = state.schedules[id] = state.schedules[id] || {};
+      SCH.forEach(function(p) { var i = col(p[0]); if (i < 0) return; var nv = normDate(row[i]); if ((s[p[1]] || null) !== nv) { diffs.push(p[0]); s[p[1]] = nv; } });
+      var ni = col('備考'); if (ni >= 0) { var nn = String(row[ni]); if ((state.notes[id] || '') !== nn) { diffs.push('備考'); state.notes[id] = nn; } }
+      var ci = col('得意先'); if (ci >= 0) { var cid = custId(row[ci]); var ex = state.machineExtra[id] = state.machineExtra[id] || {};
+        if (cid && (ex.customer || 'fuji') !== cid) { diffs.push('得意先'); ex.customer = cid; } }
+      if (diffs.length) { changed.push(id + '（' + diffs.join('・') + '）'); changedIds.push(id); }
+    }
+    if (changed.length) {
+      state.config = state.config || {};
+      state.config.lastSheetImportAt = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+      // 画面側の古い保存で戻されないよう、シートから変更した機種を記録（直近200件）
+      var prev = Array.isArray(state.config.sheetChangedIds) ? state.config.sheetChangedIds : [];
+      state.config.sheetChangedIds = changedIds.concat(prev.filter(function(x) { return changedIds.indexOf(x) < 0; })).slice(0, 200);
+      // saveData の引き継ぎ処理を通さず直接保存（シートの値が最新）
+      PropertiesService.getScriptProperties().setProperty('sinntyoku_state', JSON.stringify(state));
+    }
+    Logger.log('✅ スプレッドシートから反映: ' + (changed.length ? changed.join(' / ') : '変更なし'));
+    return JSON.stringify({ success: true, changed: changed });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** スプレッドシートの編集時に呼ばれる（setupSheetEditTrigger で設定） */
+function onDbSheetEdit(e) {
+  try {
+    if (e && e.range && e.range.getSheet().getName() !== 'DB_登録機種') return;
+    syncFromSpreadsheet();
+  } catch (err) { Logger.log('onDbSheetEdit: ' + err.message); }
+}
+
+/** [一度だけ実行] DB_登録機種 を編集したら自動でシステムへ反映するトリガーを設定 */
+function setupSheetEditTrigger() {
+  var id = PropertiesService.getScriptProperties().getProperty('dbSpreadsheetId') || DB_SPREADSHEET_ID_DEFAULT;
+  ScriptApp.getProjectTriggers().forEach(function(t) { if (t.getHandlerFunction() === 'onDbSheetEdit') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('onDbSheetEdit').forSpreadsheet(id).onEdit().create();
+  Logger.log('✅ 編集トリガーを設定しました');
+  return syncFromSpreadsheet();
 }
 
 /** [任意] 毎日自動でスプレッドシートへ書き出すトリガーを設定（一度だけ実行） */

@@ -422,16 +422,24 @@ function _afterMdbImport(){
   else if(currentPage==='docs')renderDocs();
 }
 
+/* 表示用: 取込データに手入力の上書き(state.modelOverrides)を重ねたもの */
+function _mdbView(key){
+  const raw=state.modelDB[key], ov=(state.modelOverrides||{})[key];
+  if(!raw&&!ov)return null;
+  const v=Object.assign({key},raw||{},ov||{});
+  v.boards=Object.assign({},(raw&&raw.boards)||{},(ov&&ov.boards)||{});
+  return v;
+}
 /* ---------- 機種一覧用: 登録機種と機種DBの統合リスト ---------- */
 function _machineForKey(key){return MACHINES.find(m=>_machineKey(m)===key||(m.id===key&&_machineCust(m.id)==='fuji'))||null;}
 function _modelRows(scope){
   const rows=[];const used={};
-  MACHINES.forEach(m=>{const k=_machineKey(m);used[k]=1;if(!_custMatch(_machineCust(m.id)))return;rows.push({key:k,m,db:state.modelDB[k]||null,cust:_machineCust(m.id)});});
+  MACHINES.forEach(m=>{const k=_machineKey(m);used[k]=1;if(!_custMatch(_machineCust(m.id)))return;rows.push({key:k,m,db:_mdbView(k),cust:_machineCust(m.id)});});
   const cutoff=_addDays(_todayStr(),-120);
   Object.keys(state.modelDB).forEach(k=>{
     if(used[k])return;
     if(!_custMatch(_keyCust(k)))return;
-    const db=state.modelDB[k];
+    const db=_mdbView(k);
     const d=db.salesDate||(db.longlead||{}).deliveryDate||'';
     const cs=state.configSheets[k];
     if(scope!=='all'&&!(d&&d>=cutoff)&&!cs)return;
@@ -462,7 +470,7 @@ function _csRules(cid){
   return o;
 }
 function _csBaseDates(key){
-  const db=state.modelDB[key]||{};const m=_machineForKey(key);
+  const db=_mdbView(key)||{};const m=_machineForKey(key);
   const sc=m?(state.schedules[m.id]||{}):{};
   return {aggDate:db.aggDate||'',salesDate:db.salesDate||'',llDelivery:(db.longlead||{}).deliveryDate||'',
     sampleImpl:sc.sampleImpl||'',sampleShip:sc.sampleShip||'',prodImpl:sc.prodImpl||'',prodShip:sc.prodShip||(m?m.prodShip:'')||''};
@@ -644,7 +652,7 @@ function saveCsEditor(key,kind,clear){
 function openModelInfo(key){
   const m=_machineForKey(key);
   if(m&&!state.modelDB[key]){openDetailModal('machine',m.id);return;}
-  const db=state.modelDB[key]||{};
+  const db=_mdbView(key)||{};
   const kv=(o,map)=>Object.keys(o||{}).filter(k=>o[k]).map(k=>`<tr><td class="muted" style="width:40%;">${_e7(map&&map[k]||k)}</td><td>${_e7(o[k])}</td></tr>`).join('');
   const hwMap={};Object.entries(_HW_LABELS).forEach(([l,f])=>hwMap[f]=l);Object.assign(hwMap,{abbr:'型式略号',orient:'液晶向き',version:'一覧表版'});
   const sec=(t,html)=>html?`<div style="font-weight:700;font-size:13px;margin:12px 0 4px;">${t}</div><table style="font-size:12px;">${html}</table>`:'';

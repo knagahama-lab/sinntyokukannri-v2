@@ -680,8 +680,13 @@ function syncToSpreadsheet() {
   var result = {};
 
   // ① 機種DB（生産計画Excel・HW構成一覧表・長納期計画・連携シートの統合結果）
-  var r1 = Object.keys(mdb).sort().map(function(k) {
-    var d = mdb[k] || {}, b = d.boards || {}, l = d.longlead || {}, h = d.hw || {};
+  var ovs = state.modelOverrides || {};
+  var allKeys = {}; Object.keys(mdb).forEach(function(k) { allKeys[k] = 1; }); Object.keys(ovs).forEach(function(k) { allKeys[k] = 1; });
+  var r1 = Object.keys(allKeys).sort().map(function(k) {
+    var d = {}, src = mdb[k] || {}, ov = ovs[k] || {};
+    Object.keys(src).forEach(function(x) { d[x] = src[x]; }); Object.keys(ov).forEach(function(x) { d[x] = ov[x]; });
+    var b = {}; [src.boards || {}, ov.boards || {}].forEach(function(o) { Object.keys(o).forEach(function(x) { b[x] = o[x]; }); });
+    var l = d.longlead || {}, h = d.hw || {};
     return [dispKey(k), custName(keyCust(k)), d.kind || '', d.title || '', d.brand || '', d.person || '',
       d.salesDate || '', d.aggDate || '', d.targetQty || '', d.salesQty || '',
       b.M || '', b.D || '', b.DE || '', b.E || '', b.C || '',

@@ -43,7 +43,7 @@ function _dispKey(key){
   return i>0&&_customers().some(c=>c.id===key.slice(0,i))?key.slice(i+1):key;
 }
 function _machineCust(id){const ex=state.machineExtra&&state.machineExtra[id];return (ex&&ex.customer)||'fuji';}
-function _machineKey(m){const c=_machineCust(m.id);const k=_mkey(m.id)||m.id;return c==='fuji'?k:c+':'+k;}
+function _machineKey(m){const ex=state.machineExtra&&state.machineExtra[m.id];if(ex&&ex.dbKey)return ex.dbKey;const c=_machineCust(m.id);const k=_mkey(m.id)||m.id;return c==='fuji'?k:c+':'+k;}
 function _custMachines(){return MACHINES.filter(m=>_custMatch(_machineCust(m.id)));}
 
 /* ---------- 上部の得意先セレクタ ---------- */
@@ -132,6 +132,134 @@ function getEstimatesForMachine(machineId){
     const owner=_customers().find(c=>(c.kw&&c.kw.length?c.kw:[c.name]).some(k=>k&&ec.includes(k)));
     return !owner||owner.id===mine;
   });
+}
+
+/* ============================================================
+   機種詳細設定（機種一覧の行クリックで開く編集画面）
+   ・登録機種: 担当/状態/台数/適合/ROM/日程/備考 は従来のデータへ直接保存
+   ・タイトル/種別/ブランド/販売時期/部品集約/使用基板 は「手入力の上書き」
+     state.modelOverrides[キー] に保存（取込データを再取込しても消えない）
+   ・機種DBのみの機種は、状態を選んで保存すると登録機種になる
+============================================================ */
+if(!state.modelOverrides)state.modelOverrides={};
+const _ED_SCH=[['sampleImpl','見本機実装'],['sampleAssy','見本機組立'],['sampleShip','見本機出荷'],['prodImpl','量産実装'],['prodAssy','量産組立'],['prodShip','量産出荷']];
+const _ED_BC=['M','D','DE','E','C'];
+
+function openMachineEditor(key){
+  const m=_machineForKey(key);
+  const raw=state.modelDB[key]||{};
+  const v=_mdbView(key)||{};
+  const ov=state.modelOverrides[key]||{};
+  const sc=m?(state.schedules[m.id]||{}):{};
+  const boards=typeof _rowBoards==='function'?_rowBoards({key,m,db:v}):(v.boards||{});
+  const cid=m?_machineCust(m.id):_keyCust(key);
+  const inp=(id,val,type,ph)=>`<input id="me-${id}" type="${type||'text'}" value="${_e8(val||'')}" placeholder="${_e8(ph||'')}" class="me-in">`;
+  const fld=(label,html,hint)=>`<label class="me-f"><span>${label}${hint?` <em>${_e8(hint)}</em>`:''}</span>${html}</label>`;
+  const src=(f)=>raw[f]&&ov[f]!=null&&ov[f]!==raw[f]?'取込値: '+raw[f]:'';
+  const stOpts=(m?'':'<option value="">（未登録・機種DBのみ）</option>')+['量産前','量産中','量産終了'].map(x=>`<option${m&&state.statuses[m.id]===x?' selected':''}>${x}</option>`).join('');
+  const csRows=CS_KINDS.map(x=>{const r=_csPeek(key,x.k);const s=_csState(key,x.k);return `<tr><td class="name">${x.label}</td>
+    <td class="c"><span class="st ${s.cls}" style="padding:0 6px;">${_e8(s.label)}</span></td><td class="c pt-cur">${_e8(s.due||'—')}</td>
+    <td><input id="me-cs-${x.k}-req" type="date" value="${_e8(r.req||'')}" class="me-in"></td>
+    <td><input id="me-cs-${x.k}-got" type="date" value="${_e8(r.got||'')}" class="me-in"></td>
+    <td><input id="me-cs-${x.k}-url" type="text" value="${_e8(r.url||'')}" placeholder="構成表のURL" class="me-in"></td></tr>`;}).join('');
+  _overlay('machine-editor',`✏️ 機種詳細設定 — ${_e8(_dispKey(key))}　<span style="font-size:11px;opacity:.85;">${_e8(_custName(cid))}${m?'／登録機種':'／機種DB'}</span>`,`
+    <style>.me-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 12px;}
+      .me-f{display:flex;flex-direction:column;gap:3px;font-size:11px;font-weight:700;color:var(--text-sub);}
+      .me-f em{font-style:normal;font-weight:400;color:#94a3b8;}
+      .me-in{width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;box-sizing:border-box;font-weight:400;color:#111;}
+      .me-h{font-size:12px;font-weight:800;margin:16px 0 8px;padding:4px 8px;background:#334155;color:#fff;border-radius:4px;}
+      @media (max-width:700px){.me-grid{grid-template-columns:1fr 1fr;}}</style>
+    <div class="me-h">■ 基本情報</div>
+    <div class="me-grid">
+      ${fld('得意先',`<select id="me-cust" class="me-in">${_custOptions(cid)}</select>`)}
+      ${fld('タイトル',inp('title',v.title),src('title'))}
+      ${fld('状態',`<select id="me-status" class="me-in">${stOpts}</select>`,m?'':'選ぶと登録機種になります')}
+      ${fld('担当',inp('person',m?m.person:v.person))}
+      ${fld('種別',`<select id="me-kind" class="me-in">${['','パチンコ','スロット'].map(x=>`<option value="${x}"${(v.kind||'')===x?' selected':''}>${x||'（未設定）'}</option>`).join('')}</select>`)}
+      ${fld('販売ブランド',inp('brand',v.brand),src('brand'))}
+      ${fld('量産台数',inp('qty',m?m.prodQty:v.salesQty))}
+      ${fld('適合',inp('compliance',m?m.compliance:''))}
+      ${fld('ROM',inp('rom',m?m.rom:''))}
+    </div>
+    <div class="me-h">■ 生産計画・日程</div>
+    <div class="me-grid">
+      ${fld('販売時期',inp('salesDate',v.salesDate,'date'),src('salesDate'))}
+      ${fld('部品集約時期',inp('aggDate',v.aggDate,'date'),src('aggDate'))}
+      <div></div>
+      ${_ED_SCH.map(([k,l])=>fld(l,inp('sch-'+k,sc[k]||(m?m[k]:''),'date'))).join('')}
+    </div>
+    <div class="me-h">■ 使用基板</div>
+    <div class="me-grid" style="grid-template-columns:repeat(5,minmax(0,1fr));">
+      ${_ED_BC.map(c=>fld(c,inp('b-'+c,boards[c]))).join('')}
+    </div>
+    <div class="me-h">■ 構成表</div>
+    <div class="pt-wrap" style="max-height:none;"><table class="pt"><thead><tr><th>構成表</th><th>状態</th><th class="pt-cur">依頼期限</th><th>依頼日</th><th>取得日</th><th>URL</th></tr></thead><tbody>${csRows}</tbody></table></div>
+    <div class="me-h">■ 備考</div>
+    <textarea id="me-notes" class="me-in" rows="3">${_e8(m?(state.notes[m.id]||''):(ov.notes||''))}</textarea>
+    <div style="display:flex;gap:6px;margin-top:14px;flex-wrap:wrap;">
+      <button class="btn btn-sm" onclick="document.getElementById('machine-editor').remove();${m?`openDetailModal('machine','${_e8(m.id)}')`:`openModelInfo('${_e8(key)}')`}">📇 図鑑・取込データを見る</button>
+      <span style="flex:1;"></span>
+      <button class="btn btn-sm" onclick="document.getElementById('machine-editor').remove()">キャンセル</button>
+      <button class="btn btn-primary btn-sm" onclick="saveMachineEditor('${_e8(key)}')">💾 保存</button>
+    </div>`,820);
+}
+
+function saveMachineEditor(key){
+  const g=id=>{const el=document.getElementById('me-'+id);return el?String(el.value).trim():'';};
+  let m=_machineForKey(key);
+  const raw=state.modelDB[key]||{};
+  const newCust=g('cust')||'fuji';
+  const status=g('status');
+  // 機種DBのみ → 状態を選んだら登録機種にする
+  if(!m&&status){
+    let id=_dispKey(key);
+    if(MACHINES.some(x=>x.id===id))id=id+'_'+newCust;
+    m={id,person:'',compliance:'',prodQty:'',rom:'',sampleImpl:null,sampleAssy:null,sampleShip:null,prodImpl:null,prodAssy:null,prodShip:null,boards:[],notes:''};
+    MACHINES.push(m);
+    if(!state.eco[id])state.eco[id]={collection:0,disassembly:0,e_inspect:0,snb_inspect:0,assembly:0,delivered:0,newParts:0};
+    _getExtra(id).dbKey=key;_getExtra(id).customer=_keyCust(key);
+    addLog(`🗂 ${_dispKey(key)} を登録機種に追加`);
+  }
+  // 手入力の上書き（取込値と同じなら上書きしない）
+  const ov=Object.assign({},state.modelOverrides[key]||{});
+  const setOv=(f,val)=>{if(val&&val!==(raw[f]||''))ov[f]=val;else delete ov[f];};
+  setOv('title',g('title'));setOv('kind',g('kind'));setOv('brand',g('brand'));
+  setOv('salesDate',g('salesDate'));setOv('aggDate',g('aggDate'));
+  const rb=raw.boards||{};const ob={};
+  _ED_BC.forEach(c=>{const val=g('b-'+c);if(val&&val!==(rb[c]||''))ob[c]=val;});
+  if(Object.keys(ob).length)ov.boards=ob;else delete ov.boards;
+  if(m){
+    m.person=g('person');m.prodQty=g('qty');m.compliance=g('compliance');m.rom=g('rom');
+    state.statuses[m.id]=status||state.statuses[m.id]||'量産前';
+    const sc=state.schedules[m.id]=state.schedules[m.id]||{};
+    _ED_SCH.forEach(([k])=>{const val=g('sch-'+k)||null;sc[k]=val;m[k]=val;});
+    state.notes[m.id]=document.getElementById('me-notes').value;
+    delete ov.person;delete ov.salesQty;delete ov.notes;
+  }else{
+    setOv('person',g('person'));setOv('salesQty',g('qty'));
+    const nt=document.getElementById('me-notes').value;if(nt)ov.notes=nt;else delete ov.notes;
+  }
+  // 構成表
+  CS_KINDS.forEach(x=>{
+    const req=g('cs-'+x.k+'-req'),got=g('cs-'+x.k+'-got'),url=g('cs-'+x.k+'-url');
+    const cur=_csPeek(key,x.k);
+    if(req||got||url||cur.req||cur.got||cur.url){const r=_csRec(key,x.k);r.req=req;r.got=got;r.url=url;}
+  });
+  if(Object.keys(ov).length)state.modelOverrides[key]=ov;else delete state.modelOverrides[key];
+  // 得意先の変更（登録機種はキーが変わるので上書き・構成表も移す）
+  if(m&&newCust!==_machineCust(m.id)){
+    const ex=_getExtra(m.id);ex.customer=newCust;delete ex.dbKey;
+    const nk=_machineKey(m);
+    if(nk!==key){
+      if(state.modelOverrides[key]){state.modelOverrides[nk]=state.modelOverrides[key];delete state.modelOverrides[key];}
+      if(state.configSheets[key]){state.configSheets[nk]=state.configSheets[key];delete state.configSheets[key];}
+    }
+  }
+  addLog(`✏️ ${_dispKey(key)} の詳細を更新`);
+  saveToGAS(`${_dispKey(key)} 詳細更新`);
+  const ovl=document.getElementById('machine-editor');if(ovl)ovl.remove();
+  showToast(`✅ ${_dispKey(key)} を保存しました`);
+  renderPage(currentPage);
 }
 
 // 起動時: セレクタを描画

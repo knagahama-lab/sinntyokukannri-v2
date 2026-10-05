@@ -185,6 +185,7 @@ function saveToGAS(alertDesc){
       catalogBoards:state.catalogBoards,
       importArchive:state.importArchive,
       configSheets:state.configSheets,
+      modelOverrides:state.modelOverrides,
     });
     google.script.run.saveData(json);
     if(alertDesc && state.config.notifyEmail){

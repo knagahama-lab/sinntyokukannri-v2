@@ -331,6 +331,9 @@ function openImportModal(){
           <label class="btn btn-sm" style="cursor:pointer;">見積書・図面・その他資料（保存のみ）
             <input type="file" multiple accept=".pdf,.xlsx,.xls" style="display:none" onchange="_importOtherDocs(event)"></label></div>
       </div>
+      <div class="imp-card" style="margin-top:12px;flex-direction:row;align-items:center;justify-content:space-between;">
+        <div><div class="imp-t">📤 スプレッドシートへ書き出し</div><div class="muted" style="font-size:11px;">機種DB・登録機種・構成表・取込履歴・得意先を「DB_」シートに書き出します</div></div>
+        <button class="btn btn-primary btn-sm" onclick="_syncToSheet(this)">書き出す</button></div>
       <div class="imp-card" style="margin-top:12px;"><div class="imp-t">3. 連携スプレッドシート（機種DBへ取込）</div>
         <div id="dbsheet-box" style="width:100%;"></div></div>
       <div class="muted" style="font-size:11px;margin:8px 0 14px;">取り込んだデータは機種コード単位で「機種DB」に統合され、機種一覧・構成表に反映されます。原本はDrive「営業進捗管理_取込資料」に自動保存されます。</div>
@@ -369,6 +372,20 @@ function handleGenericModelExcel(ev){
     };
     if(isCsv)rd.readAsArrayBuffer(f);else rd.readAsBinaryString(f);
   });
+}
+function _syncToSheet(btn){
+  if(typeof google==='undefined'||!google.script){showToast('⚠️ GAS環境でのみ実行できます');return;}
+  if(btn){btn.disabled=true;btn.textContent='書き出し中...';}
+  google.script.run
+    .withSuccessHandler(res=>{
+      if(btn){btn.disabled=false;btn.textContent='書き出す';}
+      try{const r=JSON.parse(res);
+        showToast(`✅ 書き出し完了: 機種DB ${r.counts['DB_機種']}件 / 登録機種 ${r.counts['DB_登録機種']}件 / 構成表 ${r.counts['DB_構成表']}件`,5000);
+        window.open(r.url,'_blank');
+      }catch(e){showToast('⚠️ 書き出し結果を読み取れませんでした');}
+    })
+    .withFailureHandler(err=>{if(btn){btn.disabled=false;btn.textContent='書き出す';}showToast('⚠️ 書き出し失敗: '+err.message,6000);})
+    .syncToSpreadsheet();
 }
 function closeImportModal(){const m=document.getElementById('import-modal');if(m)m.remove();}
 </script>

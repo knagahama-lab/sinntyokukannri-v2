@@ -634,6 +634,103 @@ function saveModelDB(json) {
   catch (e) { return JSON.stringify({ success: false, error: e.message }); }
 }
 
+/* ============================================================
+   スプレッドシートへの書き出し（システムのデータを一覧で見られるようにする）
+   【実行する関数】 syncToSpreadsheet
+   書き出し先: スクリプトプロパティ dbSpreadsheetId（未設定なら下記の既定）
+   「DB_」で始まるシートだけを作成・上書きし、既存の他のシートには触れない。
+============================================================ */
+var DB_SPREADSHEET_ID_DEFAULT = '18qSYWAIyskR9qfBPC8mGp85XcLRMe4i0WuXXERAJ4-c';
+
+function syncToSpreadsheet() {
+  var props = PropertiesService.getScriptProperties();
+  var ss = SpreadsheetApp.openById(props.getProperty('dbSpreadsheetId') || DB_SPREADSHEET_ID_DEFAULT);
+  var state = {}; try { state = JSON.parse(loadData() || '{}'); } catch (e) {}
+  var mdb = {}; try { mdb = JSON.parse(loadModelDB() || '{}'); if (mdb.__error) mdb = {}; } catch (e) {}
+  var cfg = state.config || {};
+  var custs = (cfg.customers && cfg.customers.length) ? cfg.customers
+    : [{ id: 'fuji', name: '藤商事' }, { id: 'konami', name: 'コナミアミューズメント' }, { id: 'excite', name: 'エキサイト' }];
+  var custName = function(id) { for (var i = 0; i < custs.length; i++) if (custs[i].id === id) return custs[i].name; return id || '藤商事'; };
+  var keyCust = function(key) { var i = String(key).indexOf(':'); return i > 0 ? key.slice(0, i) : ((mdb[key] && mdb[key].customer) || 'fuji'); };
+  var dispKey = function(key) { var i = String(key).indexOf(':'); return i > 0 ? key.slice(i + 1) : key; };
+  var now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm');
+  var result = {};
+
+  // ① 機種DB（生産計画Excel・HW構成一覧表・長納期計画・連携シートの統合結果）
+  var r1 = Object.keys(mdb).sort().map(function(k) {
+    var d = mdb[k] || {}, b = d.boards || {}, l = d.longlead || {}, h = d.hw || {};
+    return [dispKey(k), custName(keyCust(k)), d.kind || '', d.title || '', d.brand || '', d.person || '',
+      d.salesDate || '', d.aggDate || '', d.targetQty || '', d.salesQty || '',
+      b.M || '', b.D || '', b.DE || '', b.E || '', b.C || '',
+      l.period || '', l.timing || '', l.deliveryDate || '', l.qty || '', l.frame || '', l.vdp || '',
+      h.mainBoard || '', h.cpu || '', h.lcdBoard || '', h.vdp || '', h.cgRom || '', h.effectIfBoard || '', h.lcdIfBoard || '',
+      h.lcdSize || '', h.updateDate || '', h.applyDate || '', h.version || '',
+      Object.keys(d.src || {}).join(' / '), d.updatedAt || ''];
+  });
+  result['DB_機種'] = _writeDbSheet(ss, 'DB_機種',
+    ['機種', '得意先', '種別', 'タイトル', '販売ブランド', '担当', '販売時期', '部品集約時期', '調達目標台数', '販売台数',
+     'M', 'D', 'DE', 'E', 'C', '長納期:期', '長納期:納品時期', '長納期:納品日', '長納期:台数', '長納期:枠', '長納期:VDP',
+     'HW:主制御基板', 'HW:CPU', 'HW:液晶制御基板', 'HW:VDP', 'HW:CGROM', 'HW:演出IF基板', 'HW:液晶IF基板',
+     'HW:液晶', 'HW:更新日', 'HW:申請日', 'HW:一覧表版', '取込元', '更新日'], r1, now);
+
+  // ② 登録機種（進捗管理で管理している機種）
+  var ids = {};
+  [state.statuses, state.schedules, state.machineFields, state.notes].forEach(function(o) { Object.keys(o || {}).forEach(function(k) { ids[k] = 1; }); });
+  var r2 = Object.keys(ids).sort().map(function(id) {
+    var f = (state.machineFields || {})[id] || {}, s = (state.schedules || {})[id] || {}, ex = (state.machineExtra || {})[id] || {};
+    var boards = (f.boards || []).map(function(b) { return b && b.model; }).filter(String).join(' / ');
+    return [id, custName(ex.customer || 'fuji'), f.person || '', (state.statuses || {})[id] || '', f.prodQty || '', f.compliance || '', f.rom || '',
+      boards, s.sampleImpl || '', s.sampleAssy || '', s.sampleShip || '', s.prodImpl || '', s.prodAssy || '', s.prodShip || '',
+      (state.notes || {})[id] || ''];
+  });
+  result['DB_登録機種'] = _writeDbSheet(ss, 'DB_登録機種',
+    ['機種', '得意先', '担当', 'ステータス', '量産台数', '適合', 'ROM', '使用基板',
+     '見本機実装', '見本機組立', '見本機出荷', '量産実装', '量産組立', '量産出荷', '備考'], r2, now);
+
+  // ③ 構成表（量産準備用・見本機用・量産用の依頼/取得記録）
+  var KINDS = [['prep', '量産準備用'], ['sample', '見本機用'], ['mass', '量産用']];
+  var r3 = [];
+  Object.keys(state.configSheets || {}).sort().forEach(function(k) {
+    var c = state.configSheets[k] || {}, d = mdb[k] || {};
+    KINDS.forEach(function(kk) {
+      var x = c[kk[0]]; if (!x || !(x.req || x.got || x.url || x.memo)) return;
+      r3.push([dispKey(k), custName(keyCust(k)), d.title || '', kk[1], x.req || '', x.got || '', x.got ? '取得済' : '依頼済', x.url || '', x.memo || '']);
+    });
+  });
+  result['DB_構成表'] = _writeDbSheet(ss, 'DB_構成表', ['機種', '得意先', 'タイトル', '構成表', '依頼日', '取得日', '状態', '構成表URL', 'メモ'], r3, now);
+
+  // ④ 取込履歴（Driveに保存した原本）
+  var r4 = (state.importArchive || []).map(function(a) {
+    return [a.uploadedAt || '', custName(a.customer || 'fuji'), a.category || '', a.fileName || '', a.docDate || '', a.source || '', a.url || ''];
+  });
+  result['DB_取込履歴'] = _writeDbSheet(ss, 'DB_取込履歴', ['保存日時', '得意先', '種別', 'ファイル名', '資料日付', '経路', 'URL'], r4, now);
+
+  // ⑤ 得意先
+  result['DB_得意先'] = _writeDbSheet(ss, 'DB_得意先', ['ID', '得意先名', '宛先キーワード'],
+    custs.map(function(c) { return [c.id, c.name, (c.kw || []).join(', ')]; }), now);
+
+  props.setProperty('lastSpreadsheetSyncAt', now);
+  Logger.log('✅ スプレッドシートへ書き出し完了 ' + JSON.stringify(result) + ' → ' + ss.getUrl());
+  return JSON.stringify({ success: true, url: ss.getUrl(), counts: result, at: now });
+}
+
+function _writeDbSheet(ss, name, headers, rows, now) {
+  var sh = ss.getSheetByName(name) || ss.insertSheet(name);
+  sh.clearContents();
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground('#e9edf3');
+  if (rows.length) sh.getRange(2, 1, rows.length, headers.length).setNumberFormat('@').setValues(rows);
+  sh.setFrozenRows(1);
+  sh.getRange(1, headers.length + 2).setValue('最終更新: ' + now);
+  return rows.length;
+}
+
+/** [任意] 毎日自動でスプレッドシートへ書き出すトリガーを設定（一度だけ実行） */
+function setupSpreadsheetSyncTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) { if (t.getHandlerFunction() === 'syncToSpreadsheet') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('syncToSpreadsheet').timeBased().everyDays(1).atHour(7).create();
+  return syncToSpreadsheet();
+}
+
 /**
  * 連携スプレッドシートの全シートの表示値を返す（機種DB取込用）。
  * レイアウト判定・列の対応付けはクライアント側で行う。

@@ -1,0 +1,1217 @@
+<!DOCTYPE html><html lang="ja"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>営業進捗管理システム</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;800&amp;family=IBM+Plex+Mono:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+:root{
+  --sidebar-w:240px;--sidebar-collapsed-w:60px;--sidebar-bg:#0f1729;
+  --sidebar-hover:rgba(255,255,255,.07);--sidebar-active:rgba(74,144,226,.18);
+  --sidebar-active-bar:#4a90e2;--sidebar-text:rgba(255,255,255,.65);
+  --sidebar-text-active:#fff;--sidebar-text-sub:rgba(255,255,255,.35);
+  --sidebar-border:rgba(255,255,255,.06);--sidebar-logo-bg:#0a1020;
+  --bg:#f4f6fb;--card:#fff;--border:#e8eaed;--border-light:#f0f2f5;
+  --primary:#2563eb;--primary-light:#eff6ff;--primary-dark:#1d4ed8;
+  --success:#16a34a;--danger:#dc2626;--warning:#d97706;--info:#0891b2;
+  --text:#1e293b;--text-sub:#64748b;--text-muted:#94a3b8;
+  --shadow-sm:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
+  --shadow:0 4px 12px rgba(0,0,0,.06),0 1px 3px rgba(0,0,0,.04);
+  --shadow-lg:0 10px 30px rgba(0,0,0,.12),0 4px 8px rgba(0,0,0,.06);
+  --radius:10px;--radius-sm:6px;--radius-lg:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;overflow:hidden;}
+body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text);font-size:13px;line-height:1.5;}
+button,input,select,textarea{font-family:inherit;}
+::-webkit-scrollbar{width:5px;height:5px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:#c5cdd9;border-radius:3px;}
+
+/* Shell */
+#app-shell{display:flex;height:100vh;overflow:hidden;}
+
+/* Sidebar */
+#sidebar{width:var(--sidebar-w);min-width:var(--sidebar-w);background:var(--sidebar-bg);display:flex;flex-direction:column;height:100vh;position:relative;transition:width .25s,min-width .25s;z-index:100;overflow:hidden;}
+#sidebar.collapsed{width:var(--sidebar-collapsed-w);min-width:var(--sidebar-collapsed-w);}
+.sidebar-logo{display:flex;align-items:center;gap:10px;padding:18px 16px 16px;border-bottom:1px solid var(--sidebar-border);background:var(--sidebar-logo-bg);flex-shrink:0;min-height:64px;cursor:pointer;user-select:none;}
+.sidebar-logo-icon{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#4a90e2,#2563eb);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;box-shadow:0 2px 8px rgba(74,144,226,.4);}
+.sidebar-logo-text{display:flex;flex-direction:column;overflow:hidden;transition:opacity .2s,width .2s;white-space:nowrap;}
+.sidebar-logo-title{font-size:13px;font-weight:700;color:#fff;letter-spacing:.02em;line-height:1.2;}
+.sidebar-logo-sub{font-size:10px;color:var(--sidebar-text-sub);margin-top:1px;}
+#sidebar.collapsed .sidebar-logo-text{opacity:0;width:0;overflow:hidden;}
+.sidebar-nav{flex:1;overflow-y:auto;overflow-x:hidden;padding:8px 0;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.1) transparent;}
+.sidebar-section-label{font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--sidebar-text-sub);padding:14px 18px 5px;white-space:nowrap;transition:opacity .2s;}
+#sidebar.collapsed .sidebar-section-label{opacity:0;pointer-events:none;}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 14px 9px 16px;margin:1px 8px;border-radius:var(--radius-sm);cursor:pointer;color:var(--sidebar-text);font-size:12.5px;font-weight:500;transition:all .15s;text-decoration:none;position:relative;white-space:nowrap;user-select:none;}
+.nav-item:hover{background:var(--sidebar-hover);color:var(--sidebar-text-active);}
+.nav-item.active{background:var(--sidebar-active);color:var(--sidebar-text-active);}
+.nav-item.active::before{content:'';position:absolute;left:-8px;top:50%;transform:translateY(-50%);width:3px;height:20px;background:var(--sidebar-active-bar);border-radius:0 3px 3px 0;}
+.nav-item-icon{font-size:15px;width:20px;text-align:center;flex-shrink:0;line-height:1;}
+.nav-item-label{flex:1;transition:opacity .2s;overflow:hidden;}
+.nav-badge{background:var(--danger);color:#fff;border-radius:10px;font-size:10px;font-weight:700;padding:1px 6px;flex-shrink:0;}
+#sidebar.collapsed .nav-item-label,.nav-badge-wrap{transition:opacity .2s;}
+#sidebar.collapsed .nav-badge-wrap{opacity:0;width:0;overflow:hidden;}
+.sidebar-footer{padding:12px 8px;border-top:1px solid var(--sidebar-border);flex-shrink:0;}
+.sidebar-toggle{position:absolute;top:20px;right:-12px;width:24px;height:24px;background:var(--card);border:1px solid var(--border);border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--text-sub);box-shadow:var(--shadow-sm);z-index:101;transition:transform .25s;}
+.sidebar-toggle:hover{box-shadow:var(--shadow);color:var(--primary);}
+#sidebar.collapsed .sidebar-toggle{transform:rotate(180deg);}
+
+/* Main */
+#main{flex:1;display:flex;flex-direction:column;height:100vh;overflow:hidden;min-width:0;}
+#topbar{height:56px;background:var(--card);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 24px;gap:16px;flex-shrink:0;position:sticky;top:0;z-index:50;}
+.topbar-title{font-size:15px;font-weight:700;color:var(--text);}
+.topbar-sub{font-size:11px;color:var(--text-sub);}
+.topbar-spacer{flex:1;}
+.topbar-actions{display:flex;align-items:center;gap:8px;}
+
+/* Export dropdown */
+.export-wrap{position:relative;}
+.export-menu{position:absolute;top:calc(100% + 6px);right:0;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-lg);min-width:190px;z-index:300;display:none;}
+.export-menu.open{display:block;}
+.export-menu-item{padding:9px 14px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border-light);display:flex;align-items:center;gap:8px;}
+.export-menu-item:last-child{border-bottom:none;}
+.export-menu-item:hover{background:var(--bg);}
+
+/* Content */
+#content{flex:1;overflow-y:auto;overflow-x:hidden;padding:24px;}
+.page{display:none;animation:fadeSlideIn .2s ease-out;}
+.page.active{display:block;}
+@keyframes fadeSlideIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+
+/* Cards */
+.summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:20px;}
+.summary-card{background:var(--card);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow-sm);border:1px solid var(--border-light);transition:box-shadow .2s,transform .2s;}
+.summary-card:hover{box-shadow:var(--shadow);transform:translateY(-1px);}
+.summary-card .lbl{font-size:11px;color:var(--text-sub);margin-bottom:4px;font-weight:500;}
+.summary-card .val{font-size:26px;font-weight:700;}
+.summary-card .sub{font-size:11px;color:var(--text-muted);margin-top:3px;}
+.c-blue{color:var(--primary);}.c-red{color:var(--danger);}.c-green{color:var(--success);}.c-yellow{color:var(--warning);}
+
+/* Page heading */
+.page-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;gap:12px;flex-wrap:wrap;}
+.page-heading h2{font-size:18px;font-weight:700;}
+.page-heading p{font-size:12px;color:var(--text-sub);margin-top:3px;}
+
+/* Table card */
+.table-wrap{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow-sm);overflow:hidden;border:1px solid var(--border-light);}
+.table-toolbar{padding:12px 16px;border-bottom:1px solid var(--border-light);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+.table-toolbar h2{font-size:14px;font-weight:700;color:var(--text);}
+table{width:100%;border-collapse:collapse;}
+th{padding:9px 12px;text-align:left;font-size:10.5px;font-weight:700;color:var(--text-sub);border-bottom:1px solid var(--border-light);background:#f8fafc;white-space:nowrap;}
+td{padding:10px 12px;border-bottom:1px solid var(--border-light);font-size:12.5px;vertical-align:middle;}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:#f8fafc;}
+th.center,td.center{text-align:center;}
+td.mono{font-family:'IBM Plex Mono',monospace;font-size:12px;}
+
+/* Inline edit */
+td.inline-editable{cursor:pointer;}
+td.inline-editable:hover{background:#eff6ff !important;}
+td.editing{padding:4px 8px;}
+td.editing select,td.editing input{width:100%;padding:5px 8px;border:1px solid var(--primary);border-radius:4px;font-size:12px;outline:none;}
+
+/* Badges */
+.badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:600;white-space:nowrap;}
+.badge-done{background:#f0fdf4;color:#16a34a;}
+.badge-active{background:#eff6ff;color:#2563eb;}
+.badge-wait{background:#f1f5f9;color:#475569;}
+.badge-warning{background:#fffbeb;color:#d97706;}
+.badge-danger{background:#fef2f2;color:#dc2626;}
+.badge-info{background:#f0f9ff;color:#0891b2;}
+
+/* Buttons */
+.btn{padding:7px 14px;border-radius:var(--radius-sm);border:1px solid var(--border);cursor:pointer;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:5px;transition:all .15s;background:var(--card);color:var(--text);}
+.btn:hover{background:var(--bg);}
+.btn-primary{background:var(--primary);color:#fff;border-color:var(--primary);}
+.btn-primary:hover{background:var(--primary-dark);}
+.btn-sm{padding:4px 10px;font-size:11px;}
+.btn-danger{background:var(--danger);color:#fff;border-color:var(--danger);}
+.btn-danger:hover{background:#b91c1c;}
+.btn-success{background:var(--success);color:#fff;border-color:var(--success);}
+
+/* Forms */
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px;}
+.form-field{display:flex;flex-direction:column;gap:5px;}
+.form-field label{font-size:11.5px;font-weight:600;color:var(--text);}
+.form-field input,.form-field textarea,.form-field select{padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12.5px;outline:none;color:var(--text);background:var(--card);transition:border .15s;}
+.form-field input:focus,.form-field textarea:focus,.form-field select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.08);}
+
+/* Modal */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:400;align-items:center;justify-content:center;backdrop-filter:blur(2px);}
+.modal-overlay.open{display:flex;}
+.modal{background:var(--card);border-radius:var(--radius-lg);max-width:560px;width:90%;max-height:90vh;overflow:auto;box-shadow:var(--shadow-lg);animation:modalIn .2s ease-out;}
+@keyframes modalIn{from{opacity:0;transform:scale(.96)translateY(8px);}to{opacity:1;transform:scale(1)translateY(0);}}
+.modal-head{padding:18px 22px 14px;border-bottom:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center;}
+.modal-head h3{font-size:15px;font-weight:700;}
+.modal-close{background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-sub);width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;transition:background .15s;}
+.modal-close:hover{background:var(--bg);}
+.modal-body{padding:20px 22px;}
+.modal-footer{padding:12px 22px;border-top:1px solid var(--border-light);display:flex;justify-content:flex-end;gap:8px;}
+
+/* Toast */
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:500;opacity:0;transition:opacity .3s;z-index:9999;pointer-events:none;white-space:nowrap;box-shadow:var(--shadow-lg);}
+#toast.show{opacity:1;}
+
+/* Progress */
+.prog-wrap{display:flex;align-items:center;gap:8px;}
+.prog-track{flex:1;height:6px;background:#e8eaed;border-radius:3px;overflow:hidden;}
+.prog-fill{height:100%;border-radius:3px;background:var(--primary);}
+
+/* Custom flow */
+.flow-group-card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow-sm);border:1px solid var(--border-light);margin-bottom:16px;overflow:visible;}
+.flow-group-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border-light);background:#f8fafc;border-radius:var(--radius) var(--radius) 0 0;}
+.flow-group-title{font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px;flex:1;min-width:0;}
+.flow-group-color-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+.flow-group-title-text{cursor:pointer;padding:2px 4px;border-radius:3px;}
+.flow-group-title-text:hover{background:rgba(37,99,235,.08);}
+.flow-tbl{width:100%;border-collapse:collapse;font-size:12px;}
+.flow-tbl th{background:#f8fafc;font-size:10.5px;font-weight:700;letter-spacing:.03em;padding:8px 10px;border:1px solid var(--border-light);white-space:nowrap;position:sticky;top:0;z-index:2;}
+.flow-tbl td{padding:8px 10px;border:1px solid var(--border-light);vertical-align:middle;}
+.flow-tbl tr:hover td{background:#f8fafc;}
+.flow-tbl .step-done-row td{background:#f0fdf4 !important;}
+.flow-tbl .step-near-row td{background:#fffbeb !important;}
+.flow-step-name-cell{font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;min-width:120px;}
+.flow-step-name-cell:hover .edit-hint{opacity:1;}
+.edit-hint{opacity:0;font-size:9px;color:var(--primary);transition:opacity .15s;}
+.vendor-cell{min-width:170px;}
+.vp-bar-wrap{height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;margin:4px 0;}
+.vp-bar-fill{height:100%;border-radius:3px;transition:width .3s;}
+.vendor-mgmt-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 16px 10px;border-bottom:1px solid var(--border-light);background:#fafbfe;}
+.vendor-edit-chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:3px 10px;border-radius:10px;color:#fff;cursor:pointer;user-select:none;}
+.vendor-edit-chip:hover{opacity:.85;}
+
+/* Milestone timeline */
+.milestone-section{background:var(--card);border:1px solid var(--border-light);border-radius:var(--radius);margin-bottom:12px;overflow:hidden;}
+.milestone-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:linear-gradient(135deg,#0f172a,#1e3a5f);border-bottom:1px solid var(--border-light);}
+.milestone-header h4{color:#fff;font-size:13px;font-weight:700;margin:0;}
+.milestone-body{padding:20px 24px;}
+.timeline-track{position:relative;height:6px;background:#e2e8f0;border-radius:3px;margin:32px 0 48px;}
+.timeline-fill{position:absolute;left:0;top:0;height:100%;border-radius:3px;background:linear-gradient(90deg,#16a34a,#2563eb);transition:width .5s;}
+.timeline-pin{position:absolute;top:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;}
+.timeline-pin-dot{width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.25);flex-shrink:0;}
+.timeline-pin-label{position:absolute;top:14px;font-size:10px;font-weight:700;white-space:nowrap;text-align:center;transform:translateX(-50%);left:50%;}
+.timeline-pin-sub{position:absolute;bottom:14px;font-size:9px;white-space:nowrap;transform:translateX(-50%);left:50%;color:var(--text-muted);}
+.milestone-card{background:#f8fafc;border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:8px;display:flex;align-items:flex-start;gap:14px;}
+.milestone-card.alert{background:#fef2f2;border-color:#fca5a5;}
+.milestone-card.ok{background:#f0fdf4;border-color:#86efac;}
+.milestone-card.warn{background:#fffbeb;border-color:#fcd34d;}
+.milestone-icon{font-size:24px;flex-shrink:0;line-height:1;margin-top:2px;}
+.milestone-info{flex:1;min-width:0;}
+.milestone-info h5{font-size:12px;font-weight:700;margin:0 0 3px;}
+.milestone-info .date-row{font-size:13px;font-weight:700;font-family:monospace;color:var(--primary);}
+.milestone-info .status-row{font-size:11px;margin-top:4px;}
+.linkage-tag{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;margin-top:4px;}
+.linkage-tag.linked{background:#d1fae5;color:#065f46;}
+.linkage-tag.unlinked{background:#fee2e2;color:#991b1b;}
+.linkage-tag.unknown{background:#f3f4f6;color:#6b7280;}
+.ms-counter{display:inline-block;font-size:18px;font-weight:800;font-family:monospace;color:var(--primary);}
+
+/* Gantt */
+.gantt-container{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow-sm);border:1px solid var(--border-light);overflow:hidden;}
+.gantt-row-head{width:190px;min-width:190px;flex-shrink:0;border-right:1px solid var(--border-light);padding:10px 14px;background:var(--card);display:flex;flex-direction:column;justify-content:center;}
+.gantt-timeline{flex:1;position:relative;overflow:hidden;}
+.gantt-bar{position:absolute;border-radius:4px;display:flex;align-items:center;padding:0 7px;font-size:10px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;cursor:grab;transition:opacity .1s,box-shadow .1s;user-select:none;box-shadow:0 1px 3px rgba(0,0,0,.18);}
+.gantt-bar:hover{opacity:.88;box-shadow:0 2px 8px rgba(0,0,0,.28),0 0 0 2px rgba(255,255,255,.4);}
+.gantt-bar-label{pointer-events:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;padding:0 2px;user-select:none;}
+.gantt-today-line{position:absolute;top:0;bottom:0;width:2px;background:var(--danger);opacity:.65;pointer-events:none;z-index:8;}
+.gantt-month-line{position:absolute;top:0;bottom:0;width:1px;background:var(--border-light);pointer-events:none;}
+
+/* ECO flow */
+.eco-chain{display:flex;align-items:center;gap:0;overflow-x:auto;padding:4px 0;}
+.eco-node{flex-shrink:0;min-width:120px;background:var(--card);border:2px solid var(--border);border-radius:var(--radius-sm);padding:12px 10px;text-align:center;cursor:grab;transition:all .15s;user-select:none;}
+.eco-node:hover{box-shadow:var(--shadow);}
+.eco-node.has-units{border-color:#93c5fd;background:var(--primary-light);}
+.eco-node.delivered{border-color:#86efac;background:#f0fdf4;}
+.eco-arrow{padding:0 6px;color:var(--text-muted);font-size:18px;flex-shrink:0;}
+.eco-count{font-size:34px;font-weight:700;line-height:1;font-family:'IBM Plex Mono',monospace;cursor:pointer;}
+.eco-count:hover{text-decoration:underline;}
+
+/* Filter bar & Alert */
+.filter-bar{background:var(--card);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;box-shadow:var(--shadow-sm);border:1px solid var(--border-light);}
+.alert-bar{background:#fef2f2;border:1px solid #fecaca;border-radius:var(--radius-sm);padding:8px 16px;margin-bottom:16px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--danger);font-weight:600;}
+.alert-bar-info{background:#eff6ff;border-color:#bfdbfe;color:var(--primary);}
+
+/* Simple Home Layout */
+.home-wrap{display:flex;gap:16px;align-items:flex-start;}
+.home-tree{width:260px;flex-shrink:0;background:#fff;border:1px solid var(--border-light);border-radius:12px;padding:12px;position:sticky;top:12px;max-height:calc(100vh - 120px);display:flex;flex-direction:column;}
+.home-tree-head{font-weight:700;font-size:15px;margin-bottom:8px;}
+.home-tree-body{overflow:auto;flex:1;}
+.tree-node summary{cursor:pointer;padding:5px 4px;border-radius:6px;font-size:13px;font-weight:600;list-style:none;}
+.tree-node summary::-webkit-details-marker{display:none;}
+.tree-node summary::before{content:'▸';display:inline-block;width:14px;color:var(--text-muted);font-size:10px;}
+.tree-node[open] summary::before{content:'▾';}
+.tree-node summary:hover,.tree-board:hover{background:var(--primary-light);}
+.tree-machine:hover{text-decoration:underline;}
+.tree-board{display:flex;justify-content:space-between;align-items:center;padding:4px 6px 4px 28px;font-size:12px;cursor:pointer;border-radius:6px;}
+.tree-model{color:var(--text-sub);font-family:monospace;font-size:11px;}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;}
+.dot-g{background:#22c55e;} .dot-r{background:#ef4444;}
+.muted{color:var(--text-muted);}
+.todo-strip{display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:#fff;border:1px solid var(--border-light);border-radius:12px;padding:10px 12px;margin-bottom:12px;}
+.home-main{flex:1;min-width:0;}
+.kpi-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px;}
+.kpi{display:flex;gap:12px;align-items:center;background:#fff;border:1px solid var(--border-light);border-radius:12px;padding:14px;}
+.kpi-ic{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
+.kpi-l{font-size:11px;color:var(--text-sub);}
+.kpi-v{font-size:24px;font-weight:700;line-height:1.2;}
+.st{display:inline-block;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;}
+.st-red{background:#fef2f2;color:#dc2626;} .st-yellow{background:#fffbeb;color:#b45309;}
+.st-blue{background:#eff6ff;color:#2563eb;} .st-green{background:#f0fdf4;color:#16a34a;} .st-gray{background:#f1f5f9;color:#475569;}
+
+/* PT Table Styles */
+.pt-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;}
+.pt-chip{padding:5px 12px;border:1px solid var(--border);border-radius:6px;background:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
+.pt-chip.on{background:#2563eb;border-color:#2563eb;color:#fff;}
+.pt-chip b{font-weight:800;margin-left:4px;}
+.pt-in{padding:7px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;}
+.pt-info{font-size:12px;color:var(--text-sub);margin-bottom:6px;}
+.pt-wrap{overflow:auto;max-height:calc(100vh - 300px);border:1px solid #333;background:#fff;}
+table.pt{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums;}
+table.pt th,table.pt td{border:1px solid #444;padding:3px 7px;white-space:nowrap;}
+table.pt thead th{background:#e9edf3;font-weight:800;text-align:center;position:sticky;z-index:2;color:#111;}
+table.pt thead tr:first-child th{top:0;}
+table.pt thead tr:nth-child(2) th{top:25px;}
+table.pt th.pt-cur,table.pt td.pt-cur{background:#fff200;font-weight:800;}
+table.pt td.num{text-align:right;font-weight:700;}
+table.pt td.name{font-weight:700;}
+table.pt td.spec{max-width:200px;overflow:hidden;text-overflow:ellipsis;color:#333;}
+table.pt td.c{text-align:center;}
+table.pt tr.pt-sec td{background:#334155;color:#fff;font-weight:800;letter-spacing:.05em;padding:4px 8px;}
+table.pt tbody tr:not(.pt-sec):hover td:not(.pt-cur){background:#f1f5ff;}
+table.pt tr.click{cursor:pointer;}
+table.pt .same{color:#94a3b8;}
+table.pt a.q{color:#1d4ed8;text-decoration:none;font-weight:600;}
+table.pt a.q:hover{text-decoration:underline;}
+table.pt td.cs{cursor:pointer;}
+.pt-tag{display:inline-block;padding:0 6px;border-radius:4px;font-size:10px;font-weight:700;background:#e0e7ff;color:#3730a3;margin-left:4px;}
+
+@media (max-width:900px){.home-wrap{flex-direction:column;}.home-tree{width:100%;position:static;max-height:none;}.kpi-row{grid-template-columns:repeat(2,1fr);}}
+</style>
+</head>
+<body>
+<div id="app-shell">
+  <nav id="sidebar">
+    <button class="sidebar-toggle" id="sidebar-toggle-btn" title="折り畳む" onclick="document.getElementById('sidebar').classList.toggle('collapsed')">‹</button>
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon">📊</div>
+      <div class="sidebar-logo-text">
+        <span class="sidebar-logo-title">営業進捗管理</span>
+        <span class="sidebar-logo-sub">Sales Progress System</span>
+      </div>
+    </div>
+    <div class="sidebar-nav">
+      <div class="sidebar-section-label">メインメニュー</div>
+      <div class="nav-item active" data-page="dashboard" onclick="showPage('dashboard')"><span class="nav-item-icon">📋</span><span class="nav-item-label">機種一覧</span></div>
+      <div class="nav-item" data-page="schedule" onclick="showPage('schedule')"><span class="nav-item-icon">📅</span><span class="nav-item-label">スケジュール</span></div>
+      <div class="nav-item" data-page="csheets" onclick="showPage('csheets')"><span class="nav-item-icon">📑</span><span class="nav-item-label">構成表</span></div>
+      <div class="nav-item" data-page="flow" onclick="showPage('flow')"><span class="nav-item-icon">📈</span><span class="nav-item-label">進捗状況</span></div>
+      <div class="nav-item" data-page="docs" onclick="showPage('docs')"><span class="nav-item-icon">📁</span><span class="nav-item-label">資料一覧</span></div>
+      <div class="nav-item nav-more-toggle" onclick="toggleNavMore()"><span class="nav-item-icon">📂</span><span class="nav-item-label">その他</span><span id="nav-more-arrow" style="margin-left:auto;font-size:10px;opacity:.7;" class="">▾</span></div>
+      <div id="nav-more" style="padding-left:8px;">
+        <div class="nav-item" data-page="parts" onclick="showPage('parts')"><span class="nav-item-icon">🧩</span><span class="nav-item-label">機種管理</span></div>
+        <div class="nav-item" data-page="boards" onclick="showPage('boards')"><span class="nav-item-icon">🔧</span><span class="nav-item-label">基板管理</span></div>
+        <div class="nav-item" data-page="eco" onclick="showPage('eco')"><span class="nav-item-icon">♻️</span><span class="nav-item-label">エコフロー</span><span class="nav-badge-wrap"><span class="nav-badge" id="eco-badge">380</span></span></div>
+        <div class="nav-item" data-page="priceimpact" onclick="showPage('priceimpact')"><span class="nav-item-icon">📉</span><span class="nav-item-label">値上げインパクト</span></div>
+        <div class="nav-item" data-page="catalog" onclick="showPage('catalog')"><span class="nav-item-icon">📖</span><span class="nav-item-label">製品図鑑</span></div>
+        <div class="nav-item" data-page="future" onclick="showPage('future')"><span class="nav-item-icon">🔭</span><span class="nav-item-label">将来機種計画</span><span class="nav-badge-wrap"><span class="nav-badge" id="future-badge" style="background:var(--info);">3</span></span></div>
+        <div class="nav-item" data-page="admin" onclick="showPage('admin')"><span class="nav-item-icon">⚙️</span><span class="nav-item-label">管理コンソール</span></div>
+        <div class="nav-item" data-page="log" onclick="showPage('log')"><span class="nav-item-icon">📝</span><span class="nav-item-label">更新ログ</span></div>
+      </div>
+    </div>
+    <div class="sidebar-footer">
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;color:rgba(255,255,255,.5);font-size:10px;">
+        <span style="width:6px;height:6px;border-radius:50%;background:#22c55e;flex-shrink:0;"></span>
+        <span id="sidebar-date-label" class="">2026年3月28日</span>
+      </div>
+    </div>
+  </nav>
+
+  <div id="main">
+    <div id="topbar">
+      <div>
+        <div class="topbar-title" id="topbar-title">機種一覧</div>
+        <div class="topbar-sub">遊技機 基板・エコ進捗管理 <span style="color:#2563eb;font-weight:700;" class="">[build:v2-live]</span></div>
+      </div>
+      <div class="topbar-spacer"></div>
+      <div class="topbar-actions"><div id="sync-status-box" style="display: flex; align-items: center; gap: 8px; background: rgb(248, 250, 252); padding: 3px 10px; border-radius: 20px; border: 1px solid rgb(226, 232, 240); font-size: 11.5px;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#16a34a;box-shadow:0 0 0 2px rgba(22,163,74,0.2);"></span><span style="color:#475569;font-weight:600;" class="">Drive/Gmail同期:</span><span id="sync-last-time" style="color:#1e293b;font-weight:700;" class="">10分前</span><button class="btn btn-sm" id="btn-quick-sync" style="padding:2px 8px;font-size:11px;margin-left:4px;" onclick="triggerManualSync()"><span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;">sync</span> 今すぐ確認</button></div>
+        <select id="cust-select" class="pt-in" style="font-weight:700;padding:5px 8px;" onchange="onCustChange(this.value)">
+          <option value="all" selected="">🏢 すべての得意先</option>
+          <option value="fuji">🏢 藤商事</option>
+          <option value="konami">🏢 コナミアミューズメント</option>
+          <option value="excite">🏢 エキサイト</option>
+        </select>
+        <button class="btn btn-sm btn-primary" onclick="alert('生産計画Excel・HW構成PDFを取り込めます（管理コンソールまたは外部データ取り込み機能）')">📥 外部データ取り込み</button>
+        <div class="export-wrap">
+          <button class="btn btn-sm" onclick="toggleExportMenu(event)">📤 出力 ▾</button>
+          <div class="export-menu" id="export-menu">
+            <div class="export-menu-item" onclick="alert('機種一覧 CSVを出力しました');toggleExportMenu(event)">📊 機種一覧 CSV</div>
+            <div class="export-menu-item" onclick="alert('エコ台数 CSVを出力しました');toggleExportMenu(event)">♻️ エコ台数 CSV</div>
+            <div class="export-menu-item" onclick="window.print();toggleExportMenu(event)">🖨️ 現在ページを印刷/PDF</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="content">
+      <!-- 1. DASHBOARD PAGE -->
+      <div id="page-dashboard" class="page active">
+        <div class="home-wrap">
+          <aside class="home-tree">
+            <div class="home-tree-head">機種管理</div>
+            <input class="home-search" placeholder="機種・基板検索..." id="tree-search" oninput="filterTree(this.value)">
+            <div class="home-tree-body">
+              <details class="tree-node" open="">
+                <summary><span class="tree-machine">📁 A87</span> <span class="muted" style="font-size:10px;">とある禁書目録３</span></summary>
+                <div class="tree-board"><span class="">🔲 M <span class="tree-model">M2503A</span></span><span class="dot dot-g"></span></div>
+                <div class="tree-board"><span class="">🔲 D <span class="tree-model">SNB52163A-00</span></span><span class="dot dot-g"></span></div>
+                <div class="tree-board"><span class="">🔲 DE <span class="tree-model">DE2502A</span></span><span class="dot dot-g"></span></div>
+                <div class="tree-board"><span class="">🔲 E <span class="tree-model">E2501B</span></span><span class="dot dot-g"></span></div>
+                <div class="tree-board"><span class="">🔲 C <span class="tree-model">C2501C</span></span><span class="dot dot-g"></span></div>
+              </details>
+              <details class="tree-node" open="">
+                <summary><span class="tree-machine">📁 D59B</span> <span class="muted" style="font-size:10px;">リユース計画機</span></summary>
+                <div class="tree-board"><span class="">🔲 M <span class="tree-model">M2401A</span></span><span class="dot dot-g"></span></div>
+                <div class="tree-board"><span class="">🔲 D <span class="tree-model">FJ+D2101A</span></span><span class="dot dot-g"></span></div>
+                <div class="tree-board"><span class="">🔲 C <span class="tree-model">C2401A</span></span><span class="dot dot-g"></span></div>
+              </details>
+              <details class="tree-node">
+                <summary><span class="tree-machine">📁 D61</span> <span class="muted" style="font-size:10px;">主力機</span></summary>
+                <div class="tree-board"><span class="">🔲 C <span class="tree-model">C2401A</span></span><span class="dot dot-g"></span></div>
+                <div class="tree-board"><span class="">🔲 D <span class="tree-model">FJ+D2101A</span></span><span class="dot dot-g"></span></div>
+              </details>
+              <details class="tree-node">
+                <summary><span class="tree-machine">📁 E62</span> <span class="muted" style="font-size:10px;">スロット機</span></summary>
+                <div class="tree-board"><span class="">🔲 M <span class="tree-model">M2402A</span></span><span class="dot dot-g"></span></div>
+                <div class="tree-board"><span class="">🔲 C <span class="tree-model">C2101B</span></span><span class="dot dot-g"></span></div>
+              </details>
+              <details class="tree-node">
+                <summary><span class="tree-machine">🗂 A88</span> <span class="muted" style="font-size:10px;">FT4 (計画)</span></summary>
+                <div class="tree-board"><span class="">🔲 M <span class="tree-model">M2503A</span></span><span class="dot dot-r"></span></div>
+                <div class="tree-board"><span class="">🔲 D <span class="tree-model">D2101A</span></span><span class="dot dot-g"></span></div>
+              </details>
+            </div>
+            <div class="muted" style="font-size:10px;padding:8px 4px;"><span class="dot dot-g"></span> 資料あり　<span class="dot dot-r"></span> 資料未登録</div>
+          </aside>
+
+          <section class="home-main">
+            <div class="todo-strip"><strong style="font-size: 12px; margin-right: 4px;">今やること</strong><button class="st st-red" style="border-width: medium; border-style: none; border-color: currentcolor; border-image: none; cursor: pointer; font-family: inherit;" onclick="openCsMailModal('A87', '量産準備用構成表', '2026/03/27', '奥田', 'とある禁書目録３')">✉️ A87 量産準備用 依頼メール作成（期限超過）</button><button class="st st-yellow" style="border-width: medium; border-style: none; border-color: currentcolor; border-image: none; cursor: pointer; font-family: inherit;" onclick="openCsMailModal('D61', '見本機用構成表', '2026/04/09', '山本', '超電磁砲ハイグレード')">📑 D61 見本機用 依頼作成（期限 04/09）</button><span class="st st-yellow" style="cursor: pointer;" onclick="showPage('schedule')">⚠️ D59B 量産実装（あと40日）</span><span class="st st-gray" style="cursor: pointer;" onclick="showPage('future')">📊 生産計画Excelの月次取込（30日経過）</span><span id="sync-auto-badge" style="margin-left: auto; font-size: 11px; background: rgb(239, 246, 255); color: rgb(37, 99, 235); padding: 2px 8px; border-radius: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;" class=""><span style="width:6px;height:6px;border-radius:50%;background:#2563eb;"></span> Gmail自動受領検知: 有効</span></div>
+
+            <div class="kpi-row">
+              <div class="kpi"><div class="kpi-ic" style="background:#eff6ff;color:#2563eb;">⚙️</div><div><div class="kpi-l">稼働中の機種数</div><div class="kpi-v">4</div></div></div>
+              <div class="kpi"><div class="kpi-ic" style="background:#f0fdf4;color:#0f766e;">📅</div><div><div class="kpi-l">納期直前（14日以内）</div><div class="kpi-v">1</div></div></div>
+              <div class="kpi" style="cursor:pointer;" onclick="showPage('csheets')"><div class="kpi-ic" style="background:#fffbeb;color:#b45309;">📑</div><div><div class="kpi-l">構成表 要依頼</div><div class="kpi-v">2</div></div></div>
+              <div class="kpi" style="cursor:pointer;" onclick="showPage('future')"><div class="kpi-ic" style="background:#f0fdf4;color:#15803d;">🗂</div><div><div class="kpi-l">今後の販売予定機種</div><div class="kpi-v">13</div></div></div>
+            </div>
+
+            <div class="pt-bar">
+              <span style="font-size:12px;font-weight:800;color:var(--text-sub);" class="">状態</span>
+              <button class="pt-chip on">すべて<b>17</b></button>
+              <button class="pt-chip">進行中<b>4</b></button>
+              <button class="pt-chip">量産前<b>2</b></button>
+              <button class="pt-chip">量産中<b>3</b></button>
+              <button class="pt-chip">量産終了<b>1</b></button>
+              <button class="pt-chip">計画（機種DB）<b>11</b></button>
+            </div>
+
+            <div class="pt-bar">
+              <span style="font-size:12px;font-weight:800;color:var(--text-sub);" class="">種別</span>
+              <button class="pt-chip on">すべて</button>
+              <button class="pt-chip">🎰 パチンコ</button>
+              <button class="pt-chip">🎲 スロット</button>
+              <input class="pt-in" style="flex:1;min-width:200px;" placeholder="機種・タイトル・担当・基板品番で検索..." id="pt-search" oninput="filterPtRows(this.value)">
+              <button class="btn btn-sm" onclick="window.print()">🖨 印刷</button>
+              <button class="btn btn-sm" style="color:#16a34a;border-color:#16a34a;">📥 CSV</button>
+            </div>
+
+            <div class="pt-info"><b>すべての得意先</b>：17機種（うち構成表の要依頼 <b style="color: rgb(220, 38, 38);">2</b>）。黄色が販売時期。構成表ステータス: <span class="st st-gray" style="padding: 1px 5px; font-size: 10.5px;">未依頼</span> / <span class="st st-blue" style="padding: 1px 5px; font-size: 10.5px;">✉️ 依頼済</span> / <span class="st st-green" style="padding: 1px 5px; font-size: 10.5px;">📥 自動取得済</span></div>
+
+            <div class="pt-wrap">
+              <table class="pt" id="main-pt-table">
+                <thead>
+                  <tr>
+                    <th rowspan="2" class="">機種</th>
+                    <th rowspan="2" class="">得意先</th>
+                    <th rowspan="2" class="">タイトル</th>
+                    <th rowspan="2" class="">担当</th>
+                    <th colspan="3" class="">生産計画</th>
+                    <th colspan="6" class="">枠・使用基板</th>
+                    <th colspan="3" class="">構成表</th>
+                    <th rowspan="2" class="">状態</th>
+                    <th rowspan="2" class="">進行</th>
+                  </tr>
+                  <tr>
+                    <th class="pt-cur">販売時期</th>
+                    <th class="">部品集約</th>
+                    <th class="">台数</th>
+                    <th class="">枠</th>
+                    <th class="">M</th><th class="">D</th><th class="">DE</th><th class="">E</th><th class="">C</th>
+                    <th class="">量産準備</th><th class="">見本機</th><th class="">量産用</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="pt-sec"><td colspan="19" class="">■ 藤商事 ／ パチンコ（5機種）</td></tr>
+                  <tr class="click" onclick="showPage('flow')">
+                    <td class="name">A87 <span class="pt-tag">登録</span></td>
+                    <td class="">藤商事</td>
+                    <td class="spec" title="とある魔術の禁書目録3">とある禁書目録３</td>
+                    <td class="">奥田</td>
+                    <td class="c pt-cur">2026/08/21</td>
+                    <td class="c">2026/04/10</td>
+                    <td class="num">20,000台</td>
+                    <td class="c">PFK25</td>
+                    <td class="spec">M2503A</td><td class="spec">SNB52163A-00</td><td class="spec">DE2502A</td><td class="spec">E2501B</td><td class="spec">C2501C</td>
+                    <td class="c cs" onclick="event.stopPropagation();showPage('csheets')"><span class="st st-red" style="padding:0 6px;">依頼期限超過</span></td>
+                    <td class="c cs" onclick="event.stopPropagation();showPage('csheets')"><span class="st st-red" style="padding: 0px 6px; cursor: pointer;" title="クリックで依頼メール作成" onclick="event.stopPropagation();openCsMailModal('A87','量産準備用構成表','2026/03/27','奥田','とある禁書目録３')">✉️ 要依頼 (超過)</span></td>
+                    <td class="c cs" onclick="event.stopPropagation();showPage('csheets')"><span class="st st-blue" style="padding: 0px 6px;" title="2026/03/25 依頼済 (Gmail)">✉️ 依頼済</span></td>
+                    <td class="c"><span class="st st-blue">量産前</span></td>
+                    <td class="num">33%</td>
+                  </tr>
+                  <tr class="click" onclick="showPage('flow')">
+                    <td class="name">D59B <span class="pt-tag">登録</span></td>
+                    <td class="">藤商事</td>
+                    <td class="spec" title="リユース推進機種">エピソード機 (エコ)</td>
+                    <td class="">奥田</td>
+                    <td class="c pt-cur">2026/06/08</td>
+                    <td class="c">2026/03/15</td>
+                    <td class="num">3,700台</td>
+                    <td class="c">PF45</td>
+                    <td class="spec">M2401A</td><td class="spec">FJ+D2101A</td><td class="spec">DE2101A1</td><td class="spec">E2101B</td><td class="spec">C2401A</td>
+                    <td class="c cs" onclick="event.stopPropagation();showPage('csheets')"><span class="st st-green" style="padding:0 6px;">取得済</span></td>
+                    <td class="c cs" onclick="event.stopPropagation();showPage('csheets')"><span class="st st-green" style="padding: 0px 6px;" title="Drive自動保存済 (2026/02/28)">📥 取得済</span></td>
+                    <td class="c cs" onclick="event.stopPropagation();showPage('csheets')"><span class="st st-blue" style="padding:0 6px;">依頼済</span></td>
+                    <td class="c"><span class="st st-blue">量産中</span></td>
+                    <td class="num">50%</td>
+                  </tr>
+                  <tr class="click" onclick="showPage('flow')">
+                    <td class="name">D61 <span class="pt-tag">登録</span></td>
+                    <td class="">藤商事</td>
+                    <td class="spec">超電磁砲ハイグレード</td>
+                    <td class="">山本</td>
+                    <td class="c pt-cur">2026/08/03</td>
+                    <td class="c">2026/04/20</td>
+                    <td class="num">12,000台</td>
+                    <td class="c">PFK25</td>
+                    <td class="spec">—</td><td class="spec">FJ+D2101A</td><td class="spec">DE2101A1</td><td class="spec">E2101B</td><td class="spec">C2401A</td>
+                    <td class="c cs" onclick="event.stopPropagation();showPage('csheets')"><span class="st st-green" style="padding:0 6px;">取得済</span></td>
+                    <td class="c cs" onclick="event.stopPropagation();showPage('csheets')"><span class="st st-yellow" style="padding:0 6px;">要依頼</span></td>
+                    <td class="c cs" onclick="event.stopPropagation();showPage('csheets')"><span class="st st-yellow" style="padding: 0px 6px; cursor: pointer;" title="クリックで依頼メール作成" onclick="event.stopPropagation();openCsMailModal('D61','見本機用構成表','2026/04/09','山本','超電磁砲ハイグレード')">✉️ 要依頼</span></td>
+                    <td class="c"><span class="st st-blue">量産中</span></td>
+                    <td class="num">67%</td>
+                  </tr>
+                  <tr class="click" onclick="showPage('flow')">
+                    <td class="name">A86 <span class="pt-tag">登録</span></td>
+                    <td class="">藤商事</td>
+                    <td class="spec">緋弾のアリア 完結編</td>
+                    <td class="">山本</td>
+                    <td class="c pt-cur">2026/04/10</td>
+                    <td class="c">2025/11/30</td>
+                    <td class="num">3,700台</td>
+                    <td class="c">PF45</td>
+                    <td class="spec">—</td><td class="spec">FJ+D2101A</td><td class="spec">—</td><td class="spec">E2101B</td><td class="spec">C2401A</td>
+                    <td class="c cs"><span class="st st-green" style="padding:0 6px;">取得済</span></td>
+                    <td class="c cs"><span class="st st-green" style="padding:0 6px;">取得済</span></td>
+                    <td class="c cs"><span class="st st-green" style="padding:0 6px;">取得済</span></td>
+                    <td class="c"><span class="st st-green">量産終了</span></td>
+                    <td class="num">100%</td>
+                  </tr>
+                  <tr class="click">
+                    <td class="name">A88</td>
+                    <td class="">藤商事</td>
+                    <td class="spec">FT4 (FAIRY TAIL4)</td>
+                    <td class="">山本</td>
+                    <td class="c pt-cur">2026/10/15</td>
+                    <td class="c">2026/06/15</td>
+                    <td class="num">15,000台</td>
+                    <td class="c">PFK30</td>
+                    <td class="spec">M2503A</td><td class="spec">D2101A</td><td class="spec">DE1802A</td><td class="spec">E2503B</td><td class="spec">C2501B</td>
+                    <td class="c cs"><span class="st st-gray" style="padding:0 6px;">未依頼</span></td>
+                    <td class="c cs"><span class="st st-gray" style="padding:0 6px;">未依頼</span></td>
+                    <td class="c cs"><span class="st st-gray" style="padding:0 6px;">未依頼</span></td>
+                    <td class="c"><span class="st st-gray">計画</span></td>
+                    <td class="num">—</td>
+                  </tr>
+                  <tr class="pt-sec"><td colspan="19" class="">■ 藤商事 ／ スロット（2機種）</td></tr>
+                  <tr class="click" onclick="showPage('flow')">
+                    <td class="name">E62 <span class="pt-tag">登録</span></td>
+                    <td class="">藤商事</td>
+                    <td class="spec">スマスロ 貞子</td>
+                    <td class="">長谷川</td>
+                    <td class="c pt-cur">2026/06/30</td>
+                    <td class="c">2026/03/10</td>
+                    <td class="num">15,000台</td>
+                    <td class="c">SFK18</td>
+                    <td class="spec">M2402A</td><td class="spec">FJ+D1401C</td><td class="spec">DE1802A</td><td class="spec">E2102B</td><td class="spec">C2101B</td>
+                    <td class="c cs"><span class="st st-green" style="padding:0 6px;">取得済</span></td>
+                    <td class="c cs"><span class="st st-green" style="padding:0 6px;">取得済</span></td>
+                    <td class="c cs"><span class="st st-blue" style="padding:0 6px;">依頼済</span></td>
+                    <td class="c"><span class="st st-blue">量産中</span></td>
+                    <td class="num">67%</td>
+                  </tr>
+                  <tr class="click">
+                    <td class="name">E63</td>
+                    <td class="">藤商事</td>
+                    <td class="spec">スマスロ とある科学</td>
+                    <td class="">（未定）</td>
+                    <td class="c pt-cur">2026/09/20</td>
+                    <td class="c">2026/05/20</td>
+                    <td class="num">未定</td>
+                    <td class="c">SFK18</td>
+                    <td class="spec">M2402A</td><td class="spec">FJ+D1401C</td><td class="spec">DE1802A</td><td class="spec">E2102B</td><td class="spec">C2502A</td>
+                    <td class="c cs"><span class="st st-gray" style="padding:0 6px;">未依頼</span></td>
+                    <td class="c cs"><span class="st st-gray" style="padding:0 6px;">未依頼</span></td>
+                    <td class="c cs"><span class="st st-gray" style="padding:0 6px;">未依頼</span></td>
+                    <td class="c"><span class="st st-gray">計画</span></td>
+                    <td class="num">—</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- 2. SCHEDULE PAGE -->
+      <div id="page-schedule" class="page">
+        <div class="page-heading">
+          <div>
+            <h2 class="">📅 生産スケジュール（ガントチャート）</h2>
+            <p class="">2026年3月〜9月 ｜ 今日: 3/28 ｜ 各工程（見本機/量産 実装・組立・出荷）を俯瞰管理</p>
+          </div>
+        </div>
+        <div class="gantt-container">
+          <div style="display:flex;border-bottom:2px solid var(--border);">
+            <div style="width:190px;min-width:190px;border-right:1px solid var(--border-light);padding:8px 14px;background:#f8fafc;font-size:11px;font-weight:700;color:var(--text-sub);" class="">機種</div>
+            <div style="flex:1;display:flex;min-width:600px;">
+              <div style="flex:31;border-right:1px solid var(--border-light);padding:6px 0;text-align:center;font-size:11px;font-weight:700;" class="">3月</div>
+              <div style="flex:30;border-right:1px solid var(--border-light);padding:6px 0;text-align:center;font-size:11px;font-weight:700;" class="">4月</div>
+              <div style="flex:31;border-right:1px solid var(--border-light);padding:6px 0;text-align:center;font-size:11px;font-weight:700;" class="">5月</div>
+              <div style="flex:30;border-right:1px solid var(--border-light);padding:6px 0;text-align:center;font-size:11px;font-weight:700;" class="">6月</div>
+              <div style="flex:31;border-right:1px solid var(--border-light);padding:6px 0;text-align:center;font-size:11px;font-weight:700;" class="">7月</div>
+              <div style="flex:30;border-right:1px solid var(--border-light);padding:6px 0;text-align:center;font-size:11px;font-weight:700;" class="">8月</div>
+              <div style="flex:31;padding:6px 0;text-align:center;font-size:11px;font-weight:700;" class="">9月</div>
+            </div>
+          </div>
+          <div style="min-width:790px;">
+            <!-- Row A87 -->
+            <div style="display:flex;border-bottom:1px solid var(--border-light);">
+              <div class="gantt-row-head" style="min-height:76px;">
+                <div style="font-weight:700;font-size:14px;" class="">A87</div>
+                <div style="font-size:11px;color:var(--text-sub);" class="">奥田</div>
+                <div style="margin-top:4px;"><span class="badge badge-wait">量産前</span></div>
+              </div>
+              <div class="gantt-timeline" style="flex:1;height:76px;">
+                <div class="gantt-today-line" style="left:13%;"></div>
+                <div class="gantt-bar" style="left:34%;width:14%;top:8px;height:24px;background:#1d4ed8;"><span class="gantt-bar-label">見本出荷 6/12</span></div>
+                <div class="gantt-bar" style="left:68%;width:16%;top:38px;height:24px;background:#dc2626;"><span class="gantt-bar-label">量産出荷 8/21</span></div>
+              </div>
+            </div>
+            <!-- Row D59B -->
+            <div style="display:flex;border-bottom:1px solid var(--border-light);">
+              <div class="gantt-row-head" style="min-height:76px;">
+                <div style="font-weight:700;font-size:14px;" class="">D59B</div>
+                <div style="font-size:11px;color:var(--text-sub);" class="">奥田</div>
+                <div style="margin-top:4px;"><span class="badge badge-active">量産中</span></div>
+              </div>
+              <div class="gantt-timeline" style="flex:1;height:76px;">
+                <div class="gantt-today-line" style="left:13%;"></div>
+                <div class="gantt-bar" style="left:28%;width:12%;top:8px;height:24px;background:#15803d;"><span class="gantt-bar-label">量産実装 5/7</span></div>
+                <div class="gantt-bar" style="left:44%;width:12%;top:38px;height:24px;background:#dc2626;"><span class="gantt-bar-label">量産出荷 6/8</span></div>
+              </div>
+            </div>
+            <!-- Row D61 -->
+            <div style="display:flex;border-bottom:1px solid var(--border-light);">
+              <div class="gantt-row-head" style="min-height:76px;">
+                <div style="font-weight:700;font-size:14px;" class="">D61</div>
+                <div style="font-size:11px;color:var(--text-sub);" class="">山本</div>
+                <div style="margin-top:4px;"><span class="badge badge-active">量産中</span></div>
+              </div>
+              <div class="gantt-timeline" style="flex:1;height:76px;">
+                <div class="gantt-today-line" style="left:13%;"></div>
+                <div class="gantt-bar" style="left:20%;width:18%;top:8px;height:24px;background:#1d4ed8;"><span class="gantt-bar-label">見本出荷 5/19</span></div>
+                <div class="gantt-bar" style="left:60%;width:18%;top:38px;height:24px;background:#dc2626;"><span class="gantt-bar-label">量産出荷 8/3</span></div>
+              </div>
+            </div>
+            <!-- Row E62 -->
+            <div style="display:flex;border-bottom:1px solid var(--border-light);">
+              <div class="gantt-row-head" style="min-height:76px;">
+                <div style="font-weight:700;font-size:14px;" class="">E62</div>
+                <div style="font-size:11px;color:var(--text-sub);" class="">長谷川</div>
+                <div style="margin-top:4px;"><span class="badge badge-active">量産中</span></div>
+              </div>
+              <div class="gantt-timeline" style="flex:1;height:76px;">
+                <div class="gantt-today-line" style="left:13%;"></div>
+                <div class="gantt-bar" style="left:35%;width:15%;top:8px;height:24px;background:#15803d;"><span class="gantt-bar-label">量産実装 5/21</span></div>
+                <div class="gantt-bar" style="left:52%;width:12%;top:38px;height:24px;background:#dc2626;"><span class="gantt-bar-label">量産出荷 6/30</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--text-muted);">
+          <span class=""><span style="display:inline-block;width:12px;height:12px;background:#7c3aed;border-radius:3px;"></span> 見本機実装</span>
+          <span class=""><span style="display:inline-block;width:12px;height:12px;background:#1d4ed8;border-radius:3px;"></span> 見本機出荷</span>
+          <span class=""><span style="display:inline-block;width:12px;height:12px;background:#15803d;border-radius:3px;"></span> 量産実装</span>
+          <span class=""><span style="display:inline-block;width:12px;height:12px;background:#b45309;border-radius:3px;"></span> 量産組立</span>
+          <span class=""><span style="display:inline-block;width:12px;height:12px;background:#dc2626;border-radius:3px;"></span> 量産出荷</span>
+          <span class=""><span style="display:inline-block;width:3px;height:12px;background:var(--danger);"></span> 今日 (赤線)</span>
+        </div>
+      </div>
+
+      <!-- 3. CONFIG SHEETS (構成表) -->
+      <div id="page-csheets" class="page">
+        <div class="page-heading">
+          <div>
+            <h2 class="">📑 構成表 依頼・取得管理</h2>
+            <p class="">量産準備用・見本機用・量産用の3種構成表の依頼期日と取得状況</p>
+          </div>
+          <div><div style="display: flex; gap: 8px;"><button class="btn btn-sm" onclick="triggerManualSync()"><span style="font-size:12px;" class="">🔄</span> 受領メール/Drive即時スキャン</button><button class="btn btn-sm btn-primary" onclick="openCsMailModal('A87', '量産準備用構成表', '2026/03/27', '奥田', 'とある禁書目録３')">✉️ 構成表の依頼メール作成</button></div></div>
+        </div>
+
+        <div class="pt-bar">
+          <button class="pt-chip on">⚠️ 要依頼・期限超過<b>2</b></button>
+          <button class="pt-chip">未取得あり<b>5</b></button>
+          <button class="pt-chip">✅ 3種取得済<b>1</b></button>
+          <button class="pt-chip">すべて<b>7</b></button>
+        </div>
+
+        <div class="pt-wrap">
+          <table class="pt">
+            <thead>
+              <tr>
+                <th rowspan="2" class="">機種</th>
+                <th rowspan="2" class="">得意先</th>
+                <th rowspan="2" class="">タイトル</th>
+                <th rowspan="2" class="">担当</th>
+                <th colspan="2" class="">生産計画</th>
+                <th colspan="4" class="">量産準備用 構成表</th>
+                <th colspan="4" class="">見本機用 構成表</th>
+                <th colspan="4" class="">量産用 構成表</th>
+              </tr>
+              <tr>
+                <th class="">販売時期</th><th class="">部品集約</th>
+                <th class="">状態</th><th class="pt-cur">依頼期限</th><th class="">依頼日</th><th class="">取得日</th>
+                <th class="">状態</th><th class="pt-cur">依頼期限</th><th class="">依頼日</th><th class="">取得日</th>
+                <th class="">状態</th><th class="pt-cur">依頼期限</th><th class="">依頼日</th><th class="">取得日</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="name">A87 <span class="pt-tag">登録</span></td>
+                <td class="">藤商事</td>
+                <td class="">とある禁書目録３</td>
+                <td class="">奥田</td>
+                <td class="c">2026/08/21</td><td class="c">2026/04/10</td>
+                <td class="c cs"><span class="st st-red" style="cursor: pointer;" onclick="openCsMailModal('A87','量産準備用構成表','2026/03/27','奥田','とある禁書目録３')" title="クリックでメール送信">✉️ 期限超過 (送信)</span></td><td class="c pt-cur">2026/03/27</td><td class="c">—</td><td class="c">—</td>
+                <td class="c cs"><span class="st st-blue">依頼済</span></td><td class="c pt-cur">2026/04/12</td><td class="c">2026/03/25</td><td class="c">—</td>
+                <td class="c cs"><span class="st st-gray">未依頼</span></td><td class="c pt-cur">2026/06/20</td><td class="c">—</td><td class="c">—</td>
+              </tr>
+              <tr>
+                <td class="name">D59B <span class="pt-tag">登録</span></td>
+                <td class="">藤商事</td>
+                <td class="">エピソード機 (エコ)</td>
+                <td class="">奥田</td>
+                <td class="c">2026/06/08</td><td class="c">2026/03/15</td>
+                <td class="c cs"><span class="st st-green">取得済</span></td><td class="c pt-cur">2026/03/01</td><td class="c">2026/02/20</td><td class="c">2026/02/28 📎</td>
+                <td class="c cs"><span class="st st-green">取得済</span></td><td class="c pt-cur">2026/03/15</td><td class="c">2026/03/01</td><td class="c">2026/03/10 📎</td>
+                <td class="c cs"><span class="st st-blue">依頼済</span></td><td class="c pt-cur">2026/04/07</td><td class="c">2026/03/20</td><td class="c">—</td>
+              </tr>
+              <tr>
+                <td class="name">D61 <span class="pt-tag">登録</span></td>
+                <td class="">藤商事</td>
+                <td class="">超電磁砲ハイグレード</td>
+                <td class="">山本</td>
+                <td class="c">2026/08/03</td><td class="c">2026/04/20</td>
+                <td class="c cs"><span class="st st-green">取得済</span></td><td class="c pt-cur">2026/04/06</td><td class="c">2026/03/15</td><td class="c">2026/03/25 📎</td>
+                <td class="c cs"><span class="st st-yellow" style="cursor: pointer;" onclick="openCsMailModal('D61','見本機用構成表','2026/04/09','山本','超電磁砲ハイグレード')" title="クリックでメール送信">✉️ 要依頼 (送信)</span></td><td class="c pt-cur">2026/04/09</td><td class="c">—</td><td class="c">—</td>
+                <td class="c cs"><span class="st st-gray">未依頼</span></td><td class="c pt-cur">2026/06/03</td><td class="c">—</td><td class="c">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 4. ECO FLOW PAGE -->
+      <div id="page-eco" class="page">
+        <div class="page-heading">
+          <div>
+            <h2 class="">♻️ エコフロー管理（リユース／新品工程）</h2>
+            <p class="">対象機種：D59B ｜ 回収・解体・基板検査・組立・納品台数をトラッキング</p>
+          </div>
+          <div>
+            <select class="pt-in" style="font-weight:700;">
+              <option>D59B (リユース推進機)</option>
+              <option>A86</option>
+              <option>D61</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="alert-bar alert-bar-info">
+          ℹ️ 回収 → 解体（いードリーム） → E基板検査（岐阜電子）・SNB基板検査（めいこー）[並行] → 組み立て（いードリーム） → お客様納品
+        </div>
+
+        <div class="table-wrap" style="margin-bottom:20px;">
+          <div class="table-toolbar"><h2 class="">フロー図（台数状況）</h2></div>
+          <div style="padding:20px;overflow-x:auto;">
+            <div class="eco-chain">
+              <div class="eco-node has-units">
+                <div style="font-size:11px;font-weight:700;" class="">回収</div>
+                <div style="font-size:10px;color:var(--text-sub);" class="">自社/取引先</div>
+                <div class="eco-count" style="color:var(--primary);">150</div>
+                <div style="font-size:10px;color:var(--text-muted);" class="">台</div>
+              </div>
+              <div class="eco-arrow">→</div>
+              <div class="eco-node has-units">
+                <div style="font-size:11px;font-weight:700;" class="">解体</div>
+                <div style="font-size:10px;color:var(--text-sub);" class="">いードリーム</div>
+                <div class="eco-count" style="color:var(--primary);">80</div>
+                <div style="font-size:10px;color:var(--text-muted);" class="">台</div>
+              </div>
+              <div class="eco-arrow">→</div>
+              <div class="eco-node has-units">
+                <div style="font-size:11px;font-weight:700;" class="">E基板検査</div>
+                <div style="font-size:10px;color:var(--text-sub);" class="">岐阜電子</div>
+                <div class="eco-count" style="color:var(--primary);">60</div>
+                <div style="font-size:10px;color:var(--text-muted);" class="">台</div>
+              </div>
+              <div class="eco-arrow">→</div>
+              <div class="eco-node has-units">
+                <div style="font-size:11px;font-weight:700;" class="">SNB基板検査</div>
+                <div style="font-size:10px;color:var(--text-sub);" class="">めいこー</div>
+                <div class="eco-count" style="color:var(--primary);">40</div>
+                <div style="font-size:10px;color:var(--text-muted);" class="">台</div>
+              </div>
+              <div class="eco-arrow">→</div>
+              <div class="eco-node has-units">
+                <div style="font-size:11px;font-weight:700;" class="">組み立て</div>
+                <div style="font-size:10px;color:var(--text-sub);" class="">いードリーム</div>
+                <div class="eco-count" style="color:var(--primary);">30</div>
+                <div style="font-size:10px;color:var(--text-muted);" class="">台</div>
+              </div>
+              <div class="eco-arrow">→</div>
+              <div class="eco-node delivered">
+                <div style="font-size:11px;font-weight:700;" class="">納品完了</div>
+                <div style="font-size:10px;color:var(--text-sub);" class="">お客様</div>
+                <div class="eco-count" style="color:var(--success);">20</div>
+                <div style="font-size:10px;color:var(--text-muted);" class="">台</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <div class="table-toolbar"><h2 class="">組立内訳 — リユース／新品投入</h2></div>
+          <div style="padding:16px;display:flex;gap:16px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:180px;background:var(--primary-light);border:2px solid #93c5fd;border-radius:8px;padding:14px;text-align:center;">
+              <div style="font-size:12px;font-weight:700;" class="">♻️ リユース組立</div>
+              <div class="eco-count" style="color:var(--primary);">30</div>
+              <div style="font-size:11px;color:var(--text-sub);" class="">台（67%）</div>
+            </div>
+            <div style="flex:1;min-width:180px;background:#fffbeb;border:2px solid #fcd34d;border-radius:8px;padding:14px;text-align:center;">
+              <div style="font-size:12px;font-weight:700;" class="">🆕 新品投入</div>
+              <div class="eco-count" style="color:#d97706;">15</div>
+              <div style="font-size:11px;color:var(--text-sub);" class="">台（33%）</div>
+            </div>
+            <div style="flex:1;min-width:180px;background:#f8fafc;border:2px solid var(--border);border-radius:8px;padding:14px;text-align:center;">
+              <div style="font-size:12px;font-weight:700;" class="">組立合計</div>
+              <div class="eco-count" style="color:var(--text);">45</div>
+              <div style="font-size:11px;color:var(--text-sub);" class="">台</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. FLOW / PROGRESS DETAIL PAGE -->
+      <div id="page-flow" class="page">
+        <div class="page-heading">
+          <div>
+            <h2 class="">📈 機種別 業務進捗・委託先状況</h2>
+            <p class="">工程ごとに委託先と連携して実装・組立・検査・出荷を詳細管理</p>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-sm btn-primary">A87</button>
+            <button class="btn btn-sm">D59B</button>
+            <button class="btn btn-sm">D61</button>
+            <button class="btn btn-sm">E62</button>
+          </div>
+        </div>
+
+        <div class="milestone-section">
+          <div class="milestone-header">
+            <h4 class="">🎯 A87 ゴール逆算スケジュール（初回納品：2026/08/21）</h4>
+            <span class="linkage-tag linked">🔗 見積管理 連携済</span>
+          </div>
+          <div class="milestone-body">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+              <div class="milestone-card ok">
+                <div class="milestone-icon">📄</div>
+                <div class="milestone-info">
+                  <h5 class="">見積書 提出</h5>
+                  <div class="date-row">2026/06/22</div>
+                  <div class="status-row" style="color:var(--success);font-weight:700;">✅ 提出済 (2026/03/20)</div>
+                </div>
+              </div>
+              <div class="milestone-card warn">
+                <div class="milestone-icon">📝</div>
+                <div class="milestone-info">
+                  <h5 class="">注文書 受領</h5>
+                  <div class="date-row">2026/07/22</div>
+                  <div class="status-row" style="color:#d97706;font-weight:700;">⏰ あと116日 (未受領)</div>
+                </div>
+              </div>
+              <div class="milestone-card">
+                <div class="milestone-icon">🎯</div>
+                <div class="milestone-info">
+                  <h5 class="">初回納品（ゴール）</h5>
+                  <div class="date-row">2026/08/21</div>
+                  <div class="status-row">残り 146日</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="flow-group-card">
+          <div class="flow-group-header">
+            <div class="flow-group-title">
+              <div class="flow-group-color-dot" style="background:#2563eb;"></div>
+              <span class="">量産フロー進捗</span>
+              <span style="font-size:11px;font-weight:400;color:var(--text-muted);" class="">1 / 3 完了</span>
+            </div>
+            <div class="prog-wrap" style="width:140px;">
+              <div class="prog-track"><div class="prog-fill" style="width:33%;"></div></div>
+              <span style="font-size:11px;font-weight:700;" class="">33%</span>
+            </div>
+          </div>
+          <table class="flow-tbl">
+            <thead>
+              <tr>
+                <th style="width:30px;" class="">#</th>
+                <th class="">工程名</th>
+                <th class="">期日</th>
+                <th class="">委託先A (基板実装)</th>
+                <th class="">委託先B (本体組立)</th>
+                <th class="">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="step-done-row">
+                <td class="">1</td>
+                <td class=""><strong>見本機出荷</strong></td>
+                <td class="">2026/06/12</td>
+                <td class="">✅ 完了 (100%)</td>
+                <td class="">✅ 完了 (100%)</td>
+                <td class=""><button class="btn btn-sm">詳細</button></td>
+              </tr>
+              <tr class="step-near-row">
+                <td class="">2</td>
+                <td class=""><strong>量産実装・部材手配</strong></td>
+                <td class="">2026/07/10</td>
+                <td class="">
+                  <div style="font-weight:700;color:#2563eb;" class="">🔄 進行中 45%</div>
+                  <div class="vp-bar-wrap"><div class="vp-bar-fill" style="width:45%;background:#2563eb;"></div></div>
+                </td>
+                <td class="">⏳ 未着手 0%</td>
+                <td class=""><button class="btn btn-sm">詳細</button></td>
+              </tr>
+              <tr>
+                <td class="">3</td>
+                <td class=""><strong>量産出荷</strong></td>
+                <td class="">2026/08/21</td>
+                <td class="">⏳ 未着手 0%</td>
+                <td class="">⏳ 未着手 0%</td>
+                <td class=""><button class="btn btn-sm">詳細</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 6. DOCS PAGE -->
+      <div id="page-docs" class="page">
+        <div class="page-heading">
+          <div>
+            <h2 class="">📁 資料一覧（仕様書・見積書・指示書）</h2>
+            <p class="">Drive・取込資料に保管されている各種ドキュメントを横断検索</p>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="alert('資料アップロードモーダルを開きます')">＋ 資料追加</button>
+        </div>
+
+        <div class="pt-bar">
+          <button class="pt-chip on">すべて<b>12</b></button>
+          <button class="pt-chip">生産計画<b>4</b></button>
+          <button class="pt-chip">HW構成一覧表<b>3</b></button>
+          <button class="pt-chip">見積書・注文書<b>5</b></button>
+        </div>
+
+        <div class="pt-wrap">
+          <table class="pt">
+            <thead>
+              <tr><th class="">資料名</th><th class="">得意先</th><th class="">機種 / 基板</th><th class="pt-cur">日付</th><th class="">種別</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="name"><a class="q" href="#">📄 生産計画表_260320【SUN】.xlsx</a></td>
+                <td class="">藤商事</td><td class="">全機種共通</td><td class="c pt-cur">2026/03/20</td><td class="spec">生産計画</td>
+                <td class="c"><button class="btn btn-sm">開く</button></td>
+              </tr>
+              <tr>
+                <td class="name"><a class="q" href="#">📄 【機種別】ハードウェア構成一覧表(ぱちんこ)_260701.pdf</a></td>
+                <td class="">藤商事</td><td class="">A87, A88, D62他</td><td class="c pt-cur">2026/03/11</td><td class="spec">HW構成一覧表</td>
+                <td class="c"><button class="btn btn-sm">開く</button></td>
+              </tr>
+              <tr>
+                <td class="name"><a class="q" href="#">📄 長納期化部品対応用生産計画_260315.pdf</a></td>
+                <td class="">藤商事</td><td class="">A87, D59B, D61</td><td class="c pt-cur">2026/03/15</td><td class="spec">生産計画</td>
+                <td class="c"><button class="btn btn-sm">開く</button></td>
+              </tr>
+              <tr>
+                <td class="name"><a class="q" href="#">📄 A87_組立費見積書_改訂v2.pdf</a></td>
+                <td class="">藤商事</td><td class="">A87</td><td class="c pt-cur">2026/03/20</td><td class="spec">見積書</td>
+                <td class="c"><button class="btn btn-sm">開く</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 7. PARTS / BOARDS / FUTURE / ADMIN / LOG -->
+      <div id="page-parts" class="page">
+        <div class="page-heading"><div><h2 class="">🧩 機種管理（BOM・基板構成）</h2><p class="">各機種に搭載される主基板(M)、液晶制御基板(D)、液晶IF(DE)、演出(E)、払出制御(C)の紐づけ</p></div></div>
+        <div class="table-wrap" style="padding:16px;">
+          <details open="" style="margin-bottom:12px;">
+            <summary style="font-weight:700;font-size:14px;cursor:pointer;">🎮 機種 A87 (とある禁書目録３)</summary>
+            <div style="padding:10px 0 0 16px;border-left:2px solid var(--primary);margin-top:6px;">
+              <div class="">・主制御基板: <strong>M2503A</strong> (単価: ¥14,200 / 新品在庫: 1,200)</div>
+              <div class="">・液晶制御基板: <strong>SNB52163A-00</strong> (VDP: AG6R / CGROM: 320G)</div>
+              <div class="">・演出IF基板: <strong>E2501B</strong></div>
+              <div class="">・払出制御基板: <strong>C2501C</strong></div>
+            </div>
+          </details>
+          <details style="margin-bottom:12px;">
+            <summary style="font-weight:700;font-size:14px;cursor:pointer;">🎮 機種 D59B (エピソード機)</summary>
+            <div style="padding:10px 0 0 16px;border-left:2px solid var(--primary);margin-top:6px;">
+              <div class="">・主制御基板: <strong>M2401A</strong> (リユース活用)</div>
+              <div class="">・液晶制御基板: <strong>FJ+D2101A</strong></div>
+              <div class="">・払出制御基板: <strong>C2401A</strong></div>
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <div id="page-boards" class="page">
+        <div class="page-heading"><div><h2 class="">🔧 基板マスタ管理</h2><p class="">M/D/DE/E/C カテゴリ別の基板品番・仕様・新品単価・在庫数</p></div></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th class="">カテゴリ</th><th class="">品番</th><th class="">用途</th><th class="">仕様・概要</th><th class="center">新品価格</th><th class="center">新品在庫</th><th class="center">リユース</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class=""><span class="badge badge-info">M</span></td><td class=""><strong>M2503A</strong></td><td class="">パチンコ</td><td class="">CPU IDNAC8703 / PFK30枠対応</td><td class="center">¥14,200</td><td class="center">1,200</td><td class="center">340</td></tr>
+              <tr><td class=""><span class="badge badge-info">D</span></td><td class=""><strong>SNB52163A-00</strong></td><td class="">パチンコ</td><td class="">VDP AG6R / CGROM 320G</td><td class="center">¥28,500</td><td class="center">800</td><td class="center">120</td></tr>
+              <tr><td class=""><span class="badge badge-info">D</span></td><td class=""><strong>D2101A</strong></td><td class="">パチンコ/スロット</td><td class="">VDP AG5 / 汎用型</td><td class="center">¥21,000</td><td class="center">2,400</td><td class="center">1,850</td></tr>
+              <tr><td class=""><span class="badge badge-info">C</span></td><td class=""><strong>C2501C</strong></td><td class="">パチンコ</td><td class="">PFK30枠専用 払出制御</td><td class="center">¥6,800</td><td class="center">1,500</td><td class="center">410</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="page-priceimpact" class="page">
+        <div class="page-heading"><div><h2 class="">📉 値上げインパクト分析</h2><p class="">電子部品・基板原価改定に伴う機種別利益影響シミュレーション</p></div></div>
+        <div class="summary-grid">
+          <div class="summary-card"><div class="lbl">全機種 コスト増加影響額</div><div class="val c-red">¥48,250,000</div><div class="sub">改定前後の差額合計</div></div>
+          <div class="summary-card"><div class="lbl">影響を受ける機種</div><div class="val c-blue">8 <span style="font-size:12px;color:var(--text-sub);" class="">/ 17機種</span></div><div class="sub">対象部品採用機種</div></div>
+          <div class="summary-card"><div class="lbl">最大インパクト基板</div><div class="val c-yellow">D2101A</div><div class="sub">全体の約65%を占める</div></div>
+        </div>
+      </div>
+
+      <div id="page-catalog" class="page">
+        <div class="page-heading"><div><h2 class="">📖 製品図鑑</h2><p class="">社内ナレッジ・機種および基板の製品仕様アーカイブ</p></div></div>
+        <div class="table-wrap" style="padding:20px;text-align:center;color:var(--text-sub);">
+          製品図鑑のナレッジカード（機種13件 / 基板33件）が登録されています。
+        </div>
+      </div>
+
+      <div id="page-future" class="page">
+        <div class="page-heading"><div><h2 class="">🔭 将来機種計画（向こう2年間）</h2><p class="">販売時期や適合状況などの先行計画情報</p></div></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th class="">機種コード</th><th class="">タイトル</th><th class="">種別</th><th class="">予定時期</th><th class="">目標台数</th><th class="">枠型式</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class=""><strong>e:A89</strong></td><td class="">片田舎のおっさん</td><td class="">スマートパチンコ</td><td class="">2026年秋</td><td class="">12,000台</td><td class="">PFK30</td></tr>
+              <tr><td class=""><strong>L:E64</strong></td><td class="">スロット新作B</td><td class="">スマートパチスロ</td><td class="">2026年冬</td><td class="">8,000台</td><td class="">SFK18</td></tr>
+              <tr><td class=""><strong>e:D63</strong></td><td class="">超電磁砲3</td><td class="">スマートパチンコ</td><td class="">2027年春</td><td class="">20,000台</td><td class="">PFK30</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="page-admin" class="page">
+        <div class="page-heading"><div><h2 class="">⚙️ 管理コンソール</h2><p class="">スプレッドシート連携・メール通知・データエクスポート設定</p></div></div>
+        <div class="table-wrap" style="padding:16px;">
+          <div style="margin-bottom:12px;font-weight:700;" class="">Google スプレッドシート自動同期設定</div>
+          <div style="font-size:12px;color:var(--text-sub);margin-bottom:8px;" class="">現在ID: <code>1AG4bRXw-OTiBJWfN2Ij8eZINezE94TaXE47bJBKT48w</code> と連携中</div>
+          <button class="btn btn-sm btn-primary" onclick="alert('スプレッドシートとの同期テストに成功しました')">🔄 今すぐ手動同期</button>
+        </div>
+      <div class="table-wrap" style="padding: 20px; margin-top: 20px;"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;border-bottom:1px solid var(--border-light);padding-bottom:10px;"><div><h3 style="font-size:15px;font-weight:700;" class="">🤖 Gmail / Google Drive 構成表自動連携設定</h3><div style="font-size:12px;color:var(--text-sub);margin-top:2px;" class="">返信メールの添付ファイル検知、Google Drive自動保存、ステータス自動反映のルール管理</div></div><span class="badge badge-done" style="font-size:11px;">● 常時ポーリング稼働中</span></div><div class="form-row"><div class="form-field"><label class="">Gmail 検索クエリ（自動受領スキャン条件）</label><input type="text" value="subject:[#REQ-] has:attachment filename:(xlsx OR xls OR pdf)" style="font-family:monospace;font-size:12px;"></div><div class="form-field"><label class="">スキャン同期間隔</label><select><option selected="">15分ごと（推奨）</option><option>30分ごと</option><option>1時間ごと</option><option>手動同期のみ</option></select></div></div><div class="form-row"><div class="form-field"><label class="">Google Drive 格納先フォルダパス / フォルダID</label><input type="text" value="マイドライブ/営業進捗管理_取込資料/構成表 (ID: 1x9B_qL8Zk72MnpR4T)" style="font-family:monospace;font-size:12px;"></div><div class="form-field"><label class="">自動検知時の動作アクション</label><select><option selected="">Driveへ自動保存 + 取得日セット + Slack/メール通知</option><option>Driveへ保存のみ（手動確認後に反映）</option></select></div></div><div class="form-field" style="margin-bottom:14px;"><label class="">構成表 依頼メール テンプレート設定（差し込みタグ利用可）</label><textarea rows="4" style="font-family:inherit;font-size:12px;padding:8px;">お世話になっております。株式会社{得意先} ご担当者様
+
+平素より格別のご高配を賜り厚く御礼申し上げます。
+標記の件につきまして、下記機種の【{構成表種別}】のご手配を依頼申し上げます。
+
+■ 対象機種: {機種}（{タイトル}）
+■ 依頼種別: {構成表種別}
+■ ご提出期日: {依頼期限}
+■ アップロード先Drive: https://drive.google.com/drive/folders/1x9B_qL8Zk72MnpR4T?usp=sharing
+
+※ご返信の際は件名の管理コード【{追跡コード}】を変更せずそのまま添付・ご返信ください。</textarea></div><div style="border-top:1px solid var(--border-light);padding-top:14px;margin-top:10px;"><h4 style="font-size:13px;font-weight:700;margin-bottom:8px;" class="">🕒 最近のGmail自動検知・Drive受領ログ</h4><table style="font-size:11.5px;"><thead><tr style="background:#f8fafc;"><th style="padding:6px 10px;" class="">受信検知日時</th><th style="padding:6px 10px;" class="">送信元</th><th style="padding:6px 10px;" class="">件名 / 追跡コード</th><th style="padding:6px 10px;" class="">検知ファイル / 保存先</th><th style="padding:6px 10px;" class="">ステータス</th></tr></thead><tbody><tr><td class="mono" style="padding:8px 10px;">2026/03/25 14:12</td><td class="">fuji-tech@fujimarukun.co.jp</td><td class="">Re: [#REQ-D61-SAMP] D61 見本機用構成表</td><td class=""><span class="mono">D61_見本機構成表_確定v1.xlsx</span><br><a href="#" style="color:#2563eb;text-decoration:none;" class="">📁 Drive: /構成表/D61/</a></td><td class=""><span class="badge badge-done">自動反映済 (取得日更新)</span></td></tr><tr><td class="mono" style="padding:8px 10px;">2026/02/28 17:30</td><td class="">fuji-bom@fujimarukun.co.jp</td><td class="">Re: [#REQ-D59B-PREP] D59B 量産準備用構成表</td><td class=""><span class="mono">D59B_量産準備構成表_r2.xlsx</span><br><a href="#" style="color:#2563eb;text-decoration:none;" class="">📁 Drive: /構成表/D59B/</a></td><td class=""><span class="badge badge-done">自動反映済 (取得日更新)</span></td></tr></tbody></table></div></div></div>
+
+      <div id="page-log" class="page">
+        <div class="page-heading"><div><h2 class="">📝 更新ログ</h2><p class="">直近の変更履歴</p></div></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="">日時</th><th class="">内容</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">2026/03/28 14:30</td><td class="">A87 構成表ステータス更新: 量産準備用 依頼日登録</td></tr>
+              <tr><td class="mono">2026/03/27 11:15</td><td class="">D59B エコ組立台数更新: 25台 → 30台</td></tr>
+              <tr><td class="mono">2026/03/25 09:40</td><td class="">長納期化部品対応用生産計画PDF 取込完了 (3機種更新)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+function showPage(pageId){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  const targetPage=document.getElementById('page-'+pageId);
+  if(targetPage) targetPage.classList.add('active');
+  const targetNav=document.querySelector(`.nav-item[data-page="${pageId}"]`);
+  if(targetNav) targetNav.classList.add('active');
+  const titles={
+    dashboard:'機種一覧',schedule:'スケジュール',csheets:'構成表',
+    flow:'進捗状況',docs:'資料一覧',parts:'機種管理',boards:'基板管理',
+    eco:'エコフロー管理',priceimpact:'値上げインパクト',catalog:'製品図鑑',
+    future:'将来機種計画',admin:'管理コンソール',log:'更新ログ'
+  };
+  document.getElementById('topbar-title').textContent=titles[pageId]||pageId;
+}
+
+function toggleNavMore(){
+  const box=document.getElementById('nav-more');
+  const arrow=document.getElementById('nav-more-arrow');
+  if(!box)return;
+  const isHidden=box.style.display==='none';
+  box.style.display=isHidden?'block':'none';
+  if(arrow) arrow.textContent=isHidden?'▾':'▸';
+}
+
+function toggleExportMenu(e){
+  e.stopPropagation();
+  const m=document.getElementById('export-menu');
+  m.classList.toggle('open');
+}
+document.addEventListener('click',()=>document.getElementById('export-menu')?.classList.remove('open'));
+
+function onCustChange(val){
+  const table=document.getElementById('main-pt-table');
+  if(!table)return;
+  const rows=table.querySelectorAll('tbody tr');
+  rows.forEach(r=>{
+    if(r.classList.contains('pt-sec'))return;
+    const custCell=r.children[1];
+    if(!custCell)return;
+    if(val==='all'||custCell.textContent.includes(val==='fuji'?'藤商事':val==='konami'?'コナミ':'エキサイト')){
+      r.style.display='';
+    }else{
+      r.style.display='none';
+    }
+  });
+}
+
+function filterPtRows(query){
+  const q=query.toLowerCase().trim();
+  const rows=document.querySelectorAll('#main-pt-table tbody tr');
+  rows.forEach(r=>{
+    if(r.classList.contains('pt-sec'))return;
+    r.style.display = r.textContent.toLowerCase().includes(q)?'':'none';
+  });
+}
+
+function filterTree(query){
+  const q=query.toLowerCase().trim();
+  const nodes=document.querySelectorAll('.home-tree-body .tree-node');
+  nodes.forEach(n=>{
+    n.style.display=n.textContent.toLowerCase().includes(q)?'':'none';
+  });
+}
+</script>
+
+
+
+
+<div class="modal-overlay" id="cs-mail-modal"><div class="modal" style="max-width:640px;"><div class="modal-head"><h3 style="display:flex;align-items:center;gap:8px;" class=""><span class="">✉️</span> <span class="">構成表 依頼メール送信（Gmail・Drive連携）</span></h3><button class="modal-close" onclick="closeCsMailModal()">✕</button></div><div class="modal-body" style="padding:16px 22px;"><div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 12px;font-size:12px;color:#1e40af;margin-bottom:14px;display:flex;align-items:center;gap:8px;"><span class="">💡</span><span class="">送信時に件名内の追跡コード（<code id="modal-tracking-code" style="font-weight:700;">#REQ-A87-PREP</code>）が付与され、返信添付ファイルが自動でDriveに保存・受領検知されます。</span></div><div class="form-row"><div class="form-field"><label class="">宛先 (To)</label><input type="email" id="mail-to" value="fuji-bom@fujimarukun.co.jp"></div><div class="form-field"><label class="">CC</label><input type="email" id="mail-cc" value="sales-team@company.internal; okuda@company.internal"></div></div><div class="form-field" style="margin-bottom:12px;"><label class="">件名 (Subject)</label><input type="text" id="mail-subject" value="【構成表ご依頼】A87 とある禁書目録３ 量産準備用構成表提出のお願い [#REQ-A87-PREP]" style="font-weight:600;"></div><div class="form-field" style="margin-bottom:12px;"><label class="">メール本文（Drive提出フォルダリンク案内付き）</label><textarea id="mail-body" rows="9" style="font-family:inherit;font-size:12.5px;line-height:1.6;">株式会社藤商事
+開発技術部 構成表ご担当者様
+
+平素より大変お世話になっております。営業進捗管理担当の奥田です。
+
+標記の件につきまして、下記機種の「量産準備用構成表」の作成およびご提出を依頼申し上げます。
+
+■ 対象機種: A87（とある禁書目録３）
+■ 依頼種別: 量産準備用 構成表
+■ ご提出期限: 2026/03/27（※至急ご確認をお願い致します）
+■ 提出用 Google Drive フォルダ:
+https://drive.google.com/drive/folders/1x9B_qL8Zk72MnpR4T_A87
+
+※本メールに添付ファイルを返信いただいても自動でDriveへ保存・受付処理されます。
+件名の管理コード [#REQ-A87-PREP] はそのまま返信してください。何卒よろしくお願い申し上げます。</textarea></div><div style="background:#f8fafc;padding:10px 12px;border-radius:6px;border:1px solid #e2e8f0;font-size:12px;display:flex;align-items:center;justify-content:space-between;"><span style="color:#64748b;" class="">📎 自動受領Driveフォルダ: <strong>/営業進捗管理_取込資料/構成表/A87/</strong></span><span class="badge badge-info">Google Workspace 連動中</span></div></div><div class="modal-footer"><button class="btn" onclick="closeCsMailModal()">キャンセル</button><button class="btn" onclick="saveDraftCsMail()">📝 Gmail 下書き保存</button><button class="btn btn-primary" onclick="sendCsMail()"><span class="material-symbols-outlined" style="font-size:14px;">send</span> Gmailで今すぐ送信 &amp; 依頼日に反映</button></div></div></div><div id="auto-receipt-toast" style="position: fixed; top: 68px; right: 24px; background: rgb(15, 23, 42); color: rgb(255, 255, 255); border-left: 4px solid rgb(22, 163, 74); border-radius: 8px; padding: 12px 18px; box-shadow: rgba(0, 0, 0, 0.3) 0px 10px 25px; z-index: 9999; display: none; max-width: 380px; animation: 0.25s ease-out 0s 1 normal none running fadeSlideIn;"><div style="display:flex;align-items:flex-start;gap:10px;"><span style="font-size:20px;" class="">📥</span><div style="flex:1;"><div style="font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:space-between;" class="">Gmail自動受領を検知しました<span style="font-size:10px;background:#16a34a;color:#fff;padding:1px 6px;border-radius:10px;" class="">NEW</span></div><div id="toast-receipt-text" style="font-size:11.5px;color:#cbd5e1;margin-top:4px;line-height:1.4;" class="">A87 量産準備用構成表を受信しました（ファイル: A87_量産準備構成表_v1.xlsx をDriveに自動保存、取得日を2026/03/28にセットしました）。</div></div></div></div><script>
+let currentMailContext = { machine: 'A87', type: '量産準備用構成表', deadline: '2026/03/27', rep: '奥田', title: 'とある禁書目録３' };
+function openCsMailModal(machine, type, deadline, rep, title){
+  currentMailContext = { machine, type, deadline, rep, title };
+  const code = '#REQ-' + machine + '-' + (type.includes('準備')?'PREP':type.includes('見本')?'SAMP':'MASS');
+  document.getElementById('modal-tracking-code').textContent = code;
+  document.getElementById('mail-subject').value = '【構成表ご依頼】' + machine + ' ' + title + ' ' + type + '提出のお願い [' + code + ']';
+  document.getElementById('mail-body').value = '株式会社藤商事\n開発技術部 構成表ご担当者様\n\n平素より大変お世話になっております。営業進捗管理担当の' + rep + 'です。\n\n標記の件につきまして、下記機種の「' + type + '」の作成およびご提出を依頼申し上げます。\n\n■ 対象機種: ' + machine + '（' + title + '）\n■ 依頼種別: ' + type + '\n■ ご提出期限: ' + deadline + '\n■ 提出用 Google Drive フォルダ:\nhttps://drive.google.com/drive/folders/1x9B_qL8Zk72MnpR4T_' + machine + '\n\n※本メールに添付ファイルを返信いただいても自動でDriveへ保存・受付処理されます。\n件名の管理コード [' + code + '] はそのまま返信してください。何卒よろしくお願い申し上げます。';
+  document.getElementById('cs-mail-modal').classList.add('open');
+}
+function closeCsMailModal(){
+  document.getElementById('cs-mail-modal').classList.remove('open');
+}
+function sendCsMail(){
+  closeCsMailModal();
+  const toast = document.getElementById('auto-receipt-toast');
+  document.getElementById('toast-receipt-text').innerHTML = '✉️ <strong>' + currentMailContext.machine + ' ' + currentMailContext.type + '</strong> の依頼メールを送信しました。<br>システム内の依頼日を <strong>2026/03/28</strong> に自動更新しました。';
+  toast.style.display = 'block';
+  setTimeout(()=>{ toast.style.display = 'none'; }, 4500);
+  const table = document.getElementById('main-pt-table');
+  if(currentMailContext.machine==='A87'){
+    const cell = table.querySelector('tbody tr:nth-child(2) td:nth-child(15)');
+    if(cell) cell.innerHTML = '<span class="st st-blue" style="padding:0 6px;">✉️ 依頼済 (03/28)</span>';
+    const chip = document.querySelector('.todo-strip .st-red');
+    if(chip) chip.style.display = 'none';
+  }
+}
+function saveDraftCsMail(){
+  closeCsMailModal();
+  alert('Gmailの下書きに保存しました（件名: ' + document.getElementById('mail-subject').value + '）');
+}
+function triggerManualSync(){
+  const syncBtn = document.getElementById('btn-quick-sync');
+  if(syncBtn) syncBtn.innerHTML = '🔄 同期中...';
+  setTimeout(()=>{
+    if(syncBtn) syncBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size:12px;vertical-align:middle;">sync</span> 今すぐ確認';
+    document.getElementById('sync-last-time').textContent = 'たった今';
+    const toast = document.getElementById('auto-receipt-toast');
+    document.getElementById('toast-receipt-text').innerHTML = '📩 <strong>【自動検知】A87 量産準備用構成表</strong> を受信しました。<br>ファイル: <code>A87_量産準備構成表_v1.xlsx</code> をDriveに保存し、取得日を本日（2026/03/28）に更新しました。';
+    toast.style.display = 'block';
+    setTimeout(()=>{ toast.style.display = 'none'; }, 5500);
+    const table = document.getElementById('main-pt-table');
+    const cell = table.querySelector('tbody tr:nth-child(2) td:nth-child(15)');
+    if(cell) cell.innerHTML = '<span class="st st-green" style="padding:0 6px;">📥 自動取得済 📎</span>';
+  }, 900);
+}
+</script></body></html>

@@ -145,6 +145,50 @@ if(!state.modelOverrides)state.modelOverrides={};
 const _ED_SCH=[['sampleImpl','見本機実装'],['sampleAssy','見本機組立'],['sampleShip','見本機出荷'],['prodImpl','量産実装'],['prodAssy','量産組立'],['prodShip','量産出荷']];
 const _ED_BC=['M','D','DE','E','C'];
 
+/* ---------- 枠型式 → 払出制御基板(C) の対応表 ---------- */
+const FRAME_BOARD_DEFAULT={
+  'PF45':['FJ+C2202A','FJ+C2202B'],
+  'PFK25':['FJ+C2401A'],
+  'PFK30':['FJ+C2501A','FJ+C2501B','FJ+C2501C'],
+  'SFK18':['FJ+C2502A'],
+};
+function _frameMap(){return state.config.frameBoardMap||FRAME_BOARD_DEFAULT;}
+function _frameOf(v){return (v&&(v.frame||(v.longlead||{}).frame))||'';}
+// 枠型式を選んだら C基板を自動入力（候補が複数なら先頭を入れて候補を表示）
+function _onFrameChange(fr,onOpen){
+  const c=_frameMap()[fr]||[];
+  const el=document.getElementById('me-b-C'), hint=document.getElementById('me-frame-hint');
+  // 画面を開いた時は C基板が空の場合だけ入れる（手入力した値は変えない）
+  if(el&&c.length&&(onOpen?!el.value:!c.includes(el.value)))el.value=c[0];
+  if(hint)hint.innerHTML=c.length>1?'候補: '+c.map(b=>`<a href="#" class="q" onclick="event.preventDefault();document.getElementById('me-b-C').value='${_e8(b)}';">${_e8(b)}</a>`).join('　'):'';
+}
+function openFrameMapEditor(){
+  const txt=Object.entries(_frameMap()).map(([f,b])=>`${f}: ${b.join(', ')}`).join('\n');
+  _overlay('frame-map','⚙ 枠型式と払出制御基板(C)の対応表',`
+    <div class="pt-info">1行に「枠型式: 基板名, 基板名」の形で入力します。基板が複数ある枠は、選択時に先頭の基板が入り、候補から切り替えられます。</div>
+    <textarea id="fm-text" class="pt-in" rows="10" style="width:100%;box-sizing:border-box;font-family:monospace;">${_e8(txt)}</textarea>
+    <div style="display:flex;gap:6px;margin-top:10px;"><button class="btn btn-sm" onclick="document.getElementById('fm-text').value=Object.entries(FRAME_BOARD_DEFAULT).map(([f,b])=>f+': '+b.join(', ')).join('\\n')">初期値に戻す</button>
+      <span style="flex:1;"></span><button class="btn btn-primary btn-sm" onclick="saveFrameMap()">保存</button></div>`,560);
+}
+function saveFrameMap(){
+  const map={};
+  document.getElementById('fm-text').value.split(/\r?\n/).forEach(line=>{
+    const m=line.match(/^\s*([^:：]+)[:：]\s*(.+)$/); if(!m)return;
+    const boards=m[2].split(/[,、\s]+/).map(s=>s.replace(/^[(（]/,'').trim()).filter(Boolean);
+    if(boards.length)map[m[1].trim()]=boards;
+  });
+  state.config.frameBoardMap=map;saveToGAS();addLog('⚙ 枠型式と基板の対応表を更新');
+  document.getElementById('frame-map').remove();
+  const sel=document.getElementById('me-frame');
+  if(sel){const cur=sel.value;sel.innerHTML=_frameOptions(cur);}
+  showToast('✅ 対応表を保存しました');
+}
+function _frameOptions(cur){
+  const keys=Object.keys(_frameMap());
+  if(cur&&!keys.includes(cur))keys.push(cur);
+  return '<option value="">（未設定）</option>'+keys.map(k=>`<option value="${_e8(k)}"${k===cur?' selected':''}>${_e8(k)}${_frameMap()[k]?'　→ '+_e8(_frameMap()[k].join(' / ')):''}</option>`).join('');
+}
+
 function openMachineEditor(key){
   const m=_machineForKey(key);
   const raw=state.modelDB[key]||{};
@@ -188,9 +232,13 @@ function openMachineEditor(key){
       <div></div>
       ${_ED_SCH.map(([k,l])=>fld(l,inp('sch-'+k,sc[k]||(m?m[k]:''),'date'))).join('')}
     </div>
-    <div class="me-h">■ 使用基板</div>
-    <div class="me-grid" style="grid-template-columns:repeat(5,minmax(0,1fr));">
-      ${_ED_BC.map(c=>fld(c,inp('b-'+c,boards[c]))).join('')}
+    <div class="me-h">■ 枠・使用基板</div>
+    <div class="me-grid" style="grid-template-columns:2fr 3fr;align-items:end;">
+      ${fld('枠型式',`<select id="me-frame" class="me-in" onchange="_onFrameChange(this.value)">${_frameOptions(_frameOf(v))}</select>`,'選ぶとC基板が自動で入ります')}
+      <div style="font-size:11px;padding-bottom:6px;"><span id="me-frame-hint"></span>　<a href="#" class="q" onclick="event.preventDefault();openFrameMapEditor()">⚙ 対応表を編集</a></div>
+    </div>
+    <div class="me-grid" style="grid-template-columns:repeat(5,minmax(0,1fr));margin-top:10px;">
+      ${_ED_BC.map(c=>fld(c==='C'?'C（払出制御）':c,inp('b-'+c,boards[c]))).join('')}
     </div>
     <div class="me-h">■ 構成表</div>
     <div class="pt-wrap" style="max-height:none;"><table class="pt"><thead><tr><th>構成表</th><th>状態</th><th class="pt-cur">依頼期限</th><th>依頼日</th><th>取得日</th><th>URL</th></tr></thead><tbody>${csRows}</tbody></table></div>
@@ -202,6 +250,7 @@ function openMachineEditor(key){
       <button class="btn btn-sm" onclick="document.getElementById('machine-editor').remove()">キャンセル</button>
       <button class="btn btn-primary btn-sm" onclick="saveMachineEditor('${_e8(key)}')">💾 保存</button>
     </div>`,820);
+  _onFrameChange(_frameOf(v),true);
 }
 
 function saveMachineEditor(key){
@@ -225,6 +274,7 @@ function saveMachineEditor(key){
   const setOv=(f,val)=>{if(val&&val!==(raw[f]||''))ov[f]=val;else delete ov[f];};
   setOv('title',g('title'));setOv('kind',g('kind'));setOv('brand',g('brand'));
   setOv('salesDate',g('salesDate'));setOv('aggDate',g('aggDate'));
+  {const fr=g('frame');if(fr&&fr!==((raw.longlead||{}).frame||''))ov.frame=fr;else delete ov.frame;}
   const rb=raw.boards||{};const ob={};
   _ED_BC.forEach(c=>{const val=g('b-'+c);if(val&&val!==(rb[c]||''))ob[c]=val;});
   if(Object.keys(ob).length)ov.boards=ob;else delete ov.boards;

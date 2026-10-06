@@ -127,7 +127,7 @@ function _homeData(){
     else{due=db.salesDate||ll.deliveryDate||'';st=due&&due<_todayStr()?{label:'販売済',cls:'st-green'}:{label:'計画',cls:'st-gray'};}
     const cs=typeof _csState==='function'?CS_KINDS.map(x=>({x,s:_csState(r.key,x.k)})):[];
     return Object.assign({},r,{cust:r.cust||'fuji',kind:_rowKind(r),title:db.title||'',person:(r.m&&r.m.person)||db.person||'',due,agg:db.aggDate||'',
-      qty:db.salesQty||ll.qty||(r.m?r.m.prodQty:'')||'',boards:_rowBoards(r),st,prog,cs,
+      qty:db.salesQty||ll.qty||(r.m?r.m.prodQty:'')||'',frame:db.frame||ll.frame||'',boards:_rowBoards(r),st,prog,cs,
       csAlert:cs.some(c=>c.s.label==='依頼期限超過'||c.s.label==='要依頼')});
   });
 }
@@ -159,7 +159,7 @@ function renderHome(){
   const openRow=d=>`openMachineEditor('${_e6(d.key)}')`;
   const fmt=v=>v?_e6(String(v).replace(/-/g,'/')):'<span class="same">—</span>';
   const BC=['M','D','DE','E','C'];
-  const NC=12+BC.length+(showC?1:0);
+  const NC=13+BC.length+(showC?1:0);
   const secOf=d=>(showC?_custName(d.cust)+' ／ ':'')+d.kind;
 
   let body='',last='';
@@ -172,6 +172,7 @@ function renderHome(){
       <td class="c pt-cur">${fmt(d.due)}</td>
       <td class="c">${fmt(d.agg)}</td>
       <td class="num">${_e6(d.qty)||'<span class="same">—</span>'}</td>
+      <td class="c">${_e6(d.frame)||'<span class="same">—</span>'}</td>
       ${BC.map(c=>`<td class="spec" style="max-width:110px;" title="${_e6(d.boards[c]||'')}">${_e6(d.boards[c]||'')||'<span class="same">—</span>'}</td>`).join('')}
       ${d.cs.map(c=>`<td class="c cs" onclick="event.stopPropagation();openCsEditor('${_e6(d.key)}','${c.x.k}')" title="${_e6(c.s.label+(c.s.due?' 依頼期限 '+c.s.due:''))}"><span class="st ${c.s.cls}" style="padding:0 6px;">${_e6(c.s.label.replace('（販売済）',''))}</span></td>`).join('')}
       <td class="c"><span class="st ${d.st.cls}" style="padding:0 6px;">${_e6(d.st.label)}</span></td>
@@ -223,9 +224,9 @@ function renderHome(){
       <div class="pt-info">${showC?'すべての得意先':'<b>'+_e6(_custName(_curCust()))+'</b>'}：${list.length}機種（うち構成表の要依頼 <b style="color:#dc2626;">${list.filter(d=>d.csAlert).length}</b>）。黄色が販売時期（生産計画に無い登録機種は量産出荷日）。行クリック（または編集）で機種詳細設定を開き、タイトル・日程・基板などを入力できます。</div>
       <div class="pt-wrap" id="home-pt"><table class="pt"><thead>
         <tr><th rowspan="2">機種</th>${showC?'<th rowspan="2">得意先</th>':''}<th rowspan="2">タイトル</th><th rowspan="2">担当</th>
-          <th colspan="3">生産計画</th><th colspan="${BC.length}">使用基板</th><th colspan="3">構成表</th>
+          <th colspan="3">生産計画</th><th colspan="${BC.length+1}">枠・使用基板</th><th colspan="3">構成表</th>
           <th rowspan="2">状態</th><th rowspan="2">進行</th><th rowspan="2"></th></tr>
-        <tr><th class="pt-cur">販売時期</th><th>部品集約</th><th>台数</th>${BC.map(c=>`<th>${c}</th>`).join('')}<th>量産準備用</th><th>見本機用</th><th>量産用</th></tr>
+        <tr><th class="pt-cur">販売時期</th><th>部品集約</th><th>台数</th><th>枠</th>${BC.map(c=>`<th>${c}</th>`).join('')}<th>量産準備用</th><th>見本機用</th><th>量産用</th></tr>
       </thead><tbody>${body||`<tr><td colspan="${NC}" class="c same" style="padding:20px;">該当する機種がありません</td></tr>`}</tbody></table></div>
       ${list.length>_homeLimit?`<div style="text-align:center;margin:8px;"><button class="btn btn-sm" onclick="_homeLimit+=300;renderHome()">さらに表示（残り ${list.length-_homeLimit}機種）</button></div>`:''}
     </section>
@@ -233,8 +234,8 @@ function renderHome(){
 }
 function _homeCsv(){
   const BC=['M','D','DE','E','C'];
-  _ptCsvDownload('機種一覧',['得意先','区分','機種','登録','タイトル','担当','販売時期','部品集約','台数'].concat(BC).concat(['量産準備用','見本機用','量産用','状態','進行']),
-    (window._homeList||[]).map(d=>[_custName(d.cust),d.kind,_dispKey(d.key),d.m?'登録':'',d.title,d.person,d.due,d.agg,d.qty].concat(BC.map(c=>d.boards[c]||'')).concat(d.cs.map(c=>c.s.label+(c.s.rec.req?' 依頼'+c.s.rec.req:'')+(c.s.rec.got?' 取得'+c.s.rec.got:''))).concat([d.st.label,d.prog])));
+  _ptCsvDownload('機種一覧',['得意先','区分','機種','登録','タイトル','担当','販売時期','部品集約','台数','枠'].concat(BC).concat(['量産準備用','見本機用','量産用','状態','進行']),
+    (window._homeList||[]).map(d=>[_custName(d.cust),d.kind,_dispKey(d.key),d.m?'登録':'',d.title,d.person,d.due,d.agg,d.qty,d.frame].concat(BC.map(c=>d.boards[c]||'')).concat(d.cs.map(c=>c.s.label+(c.s.rec.req?' 依頼'+c.s.rec.req:'')+(c.s.rec.got?' 取得'+c.s.rec.got:''))).concat([d.st.label,d.prog])));
 }
 
 /* ---------- 資料一覧 ---------- */

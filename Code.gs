@@ -721,8 +721,8 @@ function syncToSpreadsheet() {
   Object.keys(state.configSheets || {}).sort().forEach(function(k) {
     var c = state.configSheets[k] || {}, d = mdb[k] || {};
     KINDS.forEach(function(kk) {
-      var x = c[kk[0]]; if (!x || !(x.req || x.got || x.url || x.memo)) return;
-      r3.push([dispKey(k), custName(keyCust(k)), d.title || '', kk[1], x.req || '', x.got || '', x.got ? '取得済' : '依頼済', x.url || '', x.memo || '']);
+      var x = c[kk[0]]; if (!x || !(x.req || x.got || x.url || x.memo || x.na)) return;
+      r3.push([dispKey(k), custName(keyCust(k)), d.title || '', kk[1], x.req || '', x.got || '', x.got ? '取得済' : x.na ? '対象外' : x.req ? '依頼済' : '', x.url || '', x.memo || '']);
     });
   });
   result['DB_構成表'] = _writeDbSheet(ss, 'DB_構成表', ['機種', '得意先', 'タイトル', '構成表', '依頼日', '取得日', '状態', '構成表URL', 'メモ'], r3, now);

@@ -174,7 +174,7 @@ function renderHome(){
       <td class="num">${_e6(d.qty)||'<span class="same">—</span>'}</td>
       <td class="c">${_e6(d.frame)||'<span class="same">—</span>'}</td>
       ${BC.map(c=>`<td class="spec" style="max-width:110px;" title="${_e6(d.boards[c]||'')}">${_e6(d.boards[c]||'')||'<span class="same">—</span>'}</td>`).join('')}
-      ${d.cs.map(c=>`<td class="c cs" onclick="event.stopPropagation();openCsEditor('${_e6(d.key)}','${c.x.k}')" title="${_e6(c.s.label+(c.s.due?' 依頼期限 '+c.s.due:''))}"><span class="st ${c.s.cls}" style="padding:0 6px;">${_e6(c.s.label.replace('（販売済）',''))}</span></td>`).join('')}
+      ${d.cs.map(c=>`<td class="c" onclick="event.stopPropagation()">${_csSelect(d.key,c.x.k,c.s)}</td>`).join('')}
       <td class="c"><span class="st ${d.st.cls}" style="padding:0 6px;">${_e6(d.st.label)}</span></td>
       <td class="num" style="font-weight:500;">${d.prog||'<span class="same">—</span>'}</td>
       <td class="c" onclick="event.stopPropagation()">${true?`<button class="btn btn-sm" style="padding:1px 8px;" onclick="openMachineEditor('${_e6(d.key)}')">編集</button>`:''}</td></tr>`;

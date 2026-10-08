@@ -496,6 +496,7 @@ function _csIsPast(key){
 function _csState(key,kind){
   const rec=_csPeek(key,kind);const {due,basis}=_csDue(key,kind);
   if(rec.got)return {cls:'st-green',label:'取得済',due,basis,rec};
+  if(rec.na)return {cls:'st-gray',label:'対象外',due,basis,rec};
   if(rec.req)return {cls:'st-blue',label:'依頼済',due,basis,rec};
   if(_csIsPast(key))return {cls:'st-gray',label:'対象外（販売済）',due,basis,rec};
   if(!due)return {cls:'st-gray',label:'日程未定',due,basis,rec};
@@ -508,6 +509,30 @@ function _csChips(key){
   return `<span style="white-space:nowrap;">${CS_KINDS.map(x=>{const s=_csState(key,x.k);
     return `<span class="st ${s.cls}" style="padding:1px 6px;margin-right:2px;cursor:pointer;" title="${_e7(x.label+'：'+s.label+(s.due?'（依頼期限 '+s.due+'）':''))}"
       onclick="event.stopPropagation();openCsEditor('${_e7(key)}','${x.k}')">${x.short}</span>`;}).join('')}</span>`;
+}
+// 構成表の状態をその場で選べるプルダウン（自動判定 / 依頼済 / 取得済 / 対象外）
+function _csSelect(key,kind,s){
+  const r=s.rec||{};
+  const cur=r.got?'取得済':r.na?'対象外':r.req?'依頼済':'';
+  const auto=(!r.got&&!r.na&&!r.req)?s.label.replace('（販売済）','(販売済)'):'未依頼';
+  const opt=(v,l)=>`<option value="${v}"${cur===v?' selected':''}>${l}</option>`;
+  return `<select class="cs-sel st ${s.cls}" title="${_e7(s.label+(s.due?' 依頼期限 '+s.due:''))}" onclick="event.stopPropagation()"
+    onchange="setCsStatus('${_e7(key)}','${kind}',this.value)">${opt('',auto)}${opt('依頼済','依頼済')}${opt('取得済','取得済')}${opt('対象外','対象外')}</select>`;
+}
+function setCsStatus(key,kind,v){
+  const r=_csRec(key,kind);const t=_todayStr();
+  if(v==='依頼済'){r.na=false;if(!r.req)r.req=t;r.got='';}
+  else if(v==='取得済'){r.na=false;if(!r.got)r.got=t;}
+  else if(v==='対象外'){r.na=true;r.got='';}
+  else{r.na=false;r.req='';r.got='';}
+  const x=CS_KINDS.find(k=>k.k===kind);
+  addLog(`📑 構成表 ${_dispKey(key)} ${x.label}: ${v||'未依頼に戻す'}`);
+  saveToGAS();
+  // 表のスクロール位置を保ったまま再描画
+  const w=document.querySelector('.page.active .pt-wrap');const st=w?w.scrollTop:0,sl=w?w.scrollLeft:0;
+  renderPage(currentPage);
+  const w2=document.querySelector('.page.active .pt-wrap');if(w2){w2.scrollTop=st;w2.scrollLeft=sl;}
+  showToast(`✅ ${_dispKey(key)} ${x.label}: ${v||'未依頼'}`);
 }
 // 今やること用: 期限超過・14日以内の未依頼
 function _csTodo(){
@@ -555,7 +580,7 @@ function renderConfigSheets(){
       <td>${_e7(d.person)||'<span class="same">—</span>'}</td>
       <td class="c">${fmt(d.sales)}</td><td class="c">${fmt(d.agg)}</td>
       ${d.cs.map(c=>{const on=`onclick="openCsEditor('${_e7(d.key)}','${c.x.k}')"`;
-        return `<td class="c cs" ${on}><span class="st ${c.s.cls}" style="padding:0 6px;">${_e7(c.s.label.replace('（販売済）',''))}</span></td>
+        return `<td class="c">${_csSelect(d.key,c.x.k,c.s)}</td>
           <td class="c cs pt-cur" ${on}>${fmt(c.s.due)}</td><td class="c cs" ${on}>${fmt(c.s.rec.req)}</td>
           <td class="c cs" ${on}>${c.s.rec.got?(c.s.rec.url?`<a class="q" href="${_e7(c.s.rec.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${fmt(c.s.rec.got)} 📎</a>`:fmt(c.s.rec.got)):'<span class="same">—</span>'}</td>`;}).join('')}
     </tr>`;

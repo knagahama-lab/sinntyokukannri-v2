@@ -87,7 +87,7 @@ function _crmBarHtml(){
     ?`<span style="font-size:12px;">🔗 CRM連携: <a class="q" href="${_e9(_crmStatus.url)}" target="_blank" rel="noopener">${_e9(_crmStatus.name)}</a></span>
       <label style="font-size:12px;display:flex;align-items:center;gap:4px;"><input type="checkbox" ${on?'checked':''} onchange="state.config.crmAutoPush=this.checked;saveToGAS();"> 保存時にCRMへ記録</label>
       <a href="#" class="q" style="font-size:11px;" onclick="event.preventDefault();_crmSetup()">変更</a>`
-    :`<span style="font-size:12px;color:#b45309;">🔗 CRM連携: 未設定</span><button class="btn btn-sm" onclick="_crmSetup()">CRMのスプレッドシートを設定</button>`;
+    :`<span style="font-size:12px;color:#b45309;">🔗 CRM連携: 未接続${_crmStatus.error?'（'+_e9(_crmStatus.error)+'）':''}</span><button class="btn btn-sm" onclick="_crmSetup()">CRMのスプレッドシートを設定</button>`;
 }
 function _crmSetup(){
   const v=prompt('自作CRMのデータが入っているスプレッドシートのURLを貼り付けてください（👥 Customers・🎙️ Meetings・📝 Activities シートがあるもの）');

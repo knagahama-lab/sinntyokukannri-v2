@@ -893,6 +893,9 @@ function saveStore(name, json) {
    CRMのスプレッドシートIDはスクリプトプロパティ crmSpreadsheetId
 ============================================================ */
 var CRM_SHEET = { customers: '👥 Customers', meetings: '🎙️ Meetings', activities: '📝 Activities' };
+// 自作CRMのスプレッドシート（2026-10-09 ユーザー指定）。画面から変更した場合はそちらを優先
+var CRM_SPREADSHEET_ID_DEFAULT = '1rq6TdJdlmGcUyoOff5IMA9RnpX0oyCU7lsOy9UVoqWw';
+function _crmSheetId() { return PropertiesService.getScriptProperties().getProperty('crmSpreadsheetId') || CRM_SPREADSHEET_ID_DEFAULT; }
 
 function setCrmSpreadsheet(urlOrId) {
   try {
@@ -906,9 +909,14 @@ function setCrmSpreadsheet(urlOrId) {
   } catch (e) { return JSON.stringify({ success: false, error: e.message }); }
 }
 function getCrmStatus() {
-  var id = PropertiesService.getScriptProperties().getProperty('crmSpreadsheetId');
+  var id = _crmSheetId();
   if (!id) return JSON.stringify({ connected: false });
-  try { var ss = SpreadsheetApp.openById(id); return JSON.stringify({ connected: true, name: ss.getName(), url: ss.getUrl() }); }
+  try {
+    var ss = SpreadsheetApp.openById(id);
+    var missing = [CRM_SHEET.meetings, CRM_SHEET.activities, CRM_SHEET.customers].filter(function(n) { return !ss.getSheetByName(n); });
+    if (missing.length) return JSON.stringify({ connected: false, error: 'CRMのシートが見つかりません: ' + missing.join(', ') + '（シート一覧: ' + ss.getSheets().map(function(x) { return x.getName(); }).join(', ') + '）' });
+    return JSON.stringify({ connected: true, name: ss.getName(), url: ss.getUrl() });
+  }
   catch (e) { return JSON.stringify({ connected: false, error: e.message }); }
 }
 function _crmId(prefix) {
@@ -928,7 +936,7 @@ function pushMeetingToCrm(json) {
   var lock = LockService.getScriptLock(); lock.waitLock(20000);
   try {
     var p = JSON.parse(json);
-    var id = PropertiesService.getScriptProperties().getProperty('crmSpreadsheetId');
+    var id = _crmSheetId();
     if (!id) return JSON.stringify({ success: false, error: 'CRMのスプレッドシートが未設定です（定例・TODO → CRM連携の設定）' });
     var ss = SpreadsheetApp.openById(id);
     var me = Session.getActiveUser().getEmail();

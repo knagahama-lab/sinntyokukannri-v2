@@ -29,6 +29,104 @@ function _mtSave(){
     .withFailureHandler(err=>showToast('⚠️ 議事録の保存に失敗: '+err.message,6000)).saveStore(MT_STORE,JSON.stringify(_mt));
 }
 
+/* ---------- 定例マスタ（定例の種類）と社内打合せ ---------- */
+const MT_SERIES_DEFAULT=[{id:'shizai',name:'資材課 定例打ち合わせ',kind:'customer',customer:'fuji',interval:14,attendees:'藤商事 資材課'}];
+function _mtSeries(){
+  if(!Array.isArray(state.config.meetingSeries))state.config.meetingSeries=JSON.parse(JSON.stringify(MT_SERIES_DEFAULT));
+  return state.config.meetingSeries;
+}
+// 会議の種類: 定例マスタの各定例 ＋ 単発のお客様打合せ ＋ 社内打合せ
+function _mtKindOptions(sel){
+  return _mtSeries().map(x=>`<option value="${_e9(x.id)}"${sel===x.id?' selected':''}>📅 ${_e9(x.name)}（${_e9(_custName(x.customer))}・${x.interval?x.interval+'日ごと':'不定期'}）</option>`).join('')
+    +`<option value="__customer"${sel==='__customer'?' selected':''}>🤝 お客様打合せ（単発）</option>`
+    +`<option value="__internal"${sel==='__internal'?' selected':''}>🏢 社内打合せ</option>`;
+}
+function _mtPickKind(v){
+  const d=_mtDraft;d.seriesId=v;
+  const el=document.getElementById('mt-raw');if(el)d.raw=el.value;
+  const s=_mtSeries().find(x=>x.id===v);
+  if(s){d.kind='customer';d.title=s.name;d.customer=s.customer;d.attendees=s.attendees||'';if(s.interval&&d.date)d.next=_addDays(d.date,s.interval);}
+  else if(v==='__internal'){d.kind='internal';d.title='社内打合せ';d.attendees='';d.next='';}
+  else{d.kind='customer';d.title='お客様打合せ';d.next='';}
+  renderMeetings();
+}
+function openSeriesManager(){
+  const rows=_mtSeries().map((x,i)=>`<tr>
+    <td><input id="sm-name-${i}" class="me-in" value="${_e9(x.name)}"></td>
+    <td><select id="sm-cust-${i}" class="me-in">${_custOptions(x.customer)}</select></td>
+    <td><input id="sm-int-${i}" class="me-in" type="number" style="width:70px;" value="${_e9(x.interval||'')}" placeholder="日"></td>
+    <td><input id="sm-att-${i}" class="me-in" value="${_e9(x.attendees||'')}"></td>
+    <td class="c"><button class="btn btn-sm" onclick="_mtSeries().splice(${i},1);openSeriesManager();">削除</button></td></tr>`).join('');
+  _overlay('series-mgr','📅 定例の管理',`<div class="pt-info">定期的に行う打ち合わせを登録します。「間隔」を入れると次回日程を自動で入れます（2週間ごと=14）。</div>
+    <div class="pt-wrap" style="max-height:none;"><table class="pt"><thead><tr><th>定例名</th><th>得意先</th><th>間隔(日)</th><th>参加者</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div style="display:flex;gap:6px;margin-top:10px;"><button class="btn btn-sm" onclick="_mtSaveSeriesForm(true)">＋ 定例を追加</button>
+      <span style="flex:1;"></span><button class="btn btn-primary btn-sm" onclick="_mtSaveSeriesForm(false)">保存</button></div>`,720);
+}
+function _mtSaveSeriesForm(addNew){
+  _mtSeries().forEach((x,i)=>{
+    const g=k=>{const el=document.getElementById(`sm-${k}-${i}`);return el?el.value.trim():'';};
+    if(g('name'))x.name=g('name');x.customer=g('cust')||x.customer;x.interval=parseInt(g('int'),10)||0;x.attendees=g('att');
+  });
+  if(addNew){_mtSeries().push({id:'s'+Date.now().toString(36),name:'新しい定例',kind:'customer',customer:_importCust(),interval:14,attendees:''});openSeriesManager();return;}
+  saveToGAS();addLog('📅 定例マスタを更新');
+  const ov=document.getElementById('series-mgr');if(ov)ov.remove();
+  renderMeetings();showToast('✅ 定例を保存しました');
+}
+
+/* ---------- CRM連携（進捗管理 → 自作CRM） ---------- */
+let _crmStatus=null;
+function _crmLoadStatus(cb){
+  if(typeof google==='undefined'||!google.script){_crmStatus={connected:false};cb&&cb();return;}
+  google.script.run.withSuccessHandler(res=>{try{_crmStatus=JSON.parse(res);}catch(e){_crmStatus={connected:false};}cb&&cb();})
+    .withFailureHandler(()=>{_crmStatus={connected:false};cb&&cb();}).getCrmStatus();
+}
+function _crmBarHtml(){
+  if(!_crmStatus){_crmLoadStatus(()=>{if(currentPage==='meetings')renderMeetings();});return '<span class="pt-muted">CRM連携: 確認中...</span>';}
+  const on=state.config.crmAutoPush!==false;
+  return _crmStatus.connected
+    ?`<span style="font-size:12px;">🔗 CRM連携: <a class="q" href="${_e9(_crmStatus.url)}" target="_blank" rel="noopener">${_e9(_crmStatus.name)}</a></span>
+      <label style="font-size:12px;display:flex;align-items:center;gap:4px;"><input type="checkbox" ${on?'checked':''} onchange="state.config.crmAutoPush=this.checked;saveToGAS();"> 保存時にCRMへ記録</label>
+      <a href="#" class="q" style="font-size:11px;" onclick="event.preventDefault();_crmSetup()">変更</a>`
+    :`<span style="font-size:12px;color:#b45309;">🔗 CRM連携: 未設定</span><button class="btn btn-sm" onclick="_crmSetup()">CRMのスプレッドシートを設定</button>`;
+}
+function _crmSetup(){
+  const v=prompt('自作CRMのデータが入っているスプレッドシートのURLを貼り付けてください（👥 Customers・🎙️ Meetings・📝 Activities シートがあるもの）');
+  if(!v)return;
+  google.script.run.withSuccessHandler(res=>{
+    const r=JSON.parse(res);
+    if(r.success){showToast('✅ CRMと連携しました: '+r.name);_crmStatus={connected:true,name:r.name,url:r.url};renderMeetings();}
+    else showToast('⚠️ '+r.error,7000);
+  }).withFailureHandler(err=>showToast('⚠️ '+err.message,7000)).setCrmSpreadsheet(v);
+}
+// 議事録をCRM用にまとめて送る（機種・トピックごとのグループ）
+function _crmPush(meeting,silent){
+  if(typeof google==='undefined'||!google.script)return;
+  const groups=[];const byLabel={};
+  (meeting.rows||[]).forEach(r=>{
+    const label=r.kind==='machine'?(r.code+((_mdbView(r.key)||{}).title?' '+_mdbView(r.key).title:'')):(r.name||'その他');
+    let g=byLabel[label];if(!g){g=byLabel[label]={label,lines:[],todos:[]};groups.push(g);}
+    g.lines.push(`[${r.cat}] ${r.text}`+(r.fc&&(r.fc.mid||r.fc.low||r.fc.high)?`（予測 下${r.fc.low||'—'}/中${r.fc.mid||'—'}/上${r.fc.high||'—'}）`:''));
+  });
+  _mt.todos.filter(t=>t.meetingId===meeting.id).forEach(t=>{
+    const label=t.key?(_dispKey(t.key)+((_mdbView(t.key)||{}).title?' '+_mdbView(t.key).title:'')):(t.topic||'その他');
+    let g=byLabel[label];if(!g){g=byLabel[label]={label,lines:[],todos:[]};groups.push(g);}
+    g.todos.push({text:t.text,due:t.due||''});
+  });
+  const c=_cust(meeting.customer||'fuji');
+  const payload={date:meeting.date,title:meeting.title,kind:meeting.kind||'customer',customerName:c.name,customerKw:c.kw||[],
+    attendees:meeting.attendees||'',next:meeting.next||'',raw:meeting.raw||'',groups};
+  google.script.run.withSuccessHandler(res=>{
+    let r;try{r=JSON.parse(res);}catch(e){r={success:false,error:'応答を読み取れません'};}
+    if(r.success){meeting.crm={meetingId:r.meetingId,at:_todayStr(),activities:r.activities};delete meeting.crmError;
+      if(!silent)showToast(`🔗 CRMに記録しました（議事録1件・活動 ${r.activities}件）`,4000);}
+    else{meeting.crmError=r.error;showToast('⚠️ CRMへの記録に失敗: '+r.error,7000);}
+    _mtSave();if(currentPage==='meetings')renderMeetings();
+  }).withFailureHandler(err=>{meeting.crmError=err.message;_mtSave();showToast('⚠️ CRMへの記録に失敗: '+err.message,7000);}).pushMeetingToCrm(JSON.stringify(payload));
+}
+function _mtResendCrm(id){const m=_mt.meetings.find(x=>x.id===id);if(!m)return;
+  if(m.crm&&!confirm('このCRMへは記録済みです。もう一度記録しますか？（CRM側に重複して登録されます）'))return;
+  _crmPush(m);}
+
 /* ---------- メモの自動振り分け ---------- */
 const _MT_CODE=/(?:^|[^A-Za-z0-9])([A-Z]{1,2}\d{2,3}[A-Z]?(?:甘)?)(?![0-9])/g;
 function _mtCodes(t){const out=[];let m;_MT_CODE.lastIndex=0;while((m=_MT_CODE.exec(t)))if(!out.includes(m[1]))out.push(m[1]);return out;}
@@ -102,7 +200,7 @@ function _mtParse(raw,base){
       prevBlank=false;return;
     }
     // 見出し直後の短い行（インデント無し）は続きとみなす
-    if(!indented&&ctx&&ctx.type==='machine'&&!prevBlank&&t.length<=12&&!codes.length){ctx.codes.forEach(c=>rows.push(mk(c,t)));return;}
+    if(!indented&&ctx&&ctx.type==='machine'&&!prevBlank&&t.length<=12&&!codes.length&&/(台|エコ|リユース|りゆーす|新品|あり|なし|済|予定)/.test(t)){ctx.codes.forEach(c=>rows.push(mk(c,t)));return;}
     if(!indented){ctx={type:'topic',name:t.slice(0,40)};rows.push(topic(ctx.name,t));prevBlank=false;return;}
     // インデント行
     if(ctx&&ctx.type==='month'){
@@ -134,8 +232,10 @@ function renderMeetings(){
 }
 
 function _mtInputHtml(){
-  const d=_mtDraft||{date:_todayStr(),customer:_importCust(),title:'資材課 定例打ち合わせ',attendees:'',next:'',raw:'',rows:null};
-  _mtDraft=d;
+  if(!_mtDraft){const s0=_mtSeries()[0];
+    _mtDraft={date:_todayStr(),seriesId:s0?s0.id:'__customer',kind:'customer',customer:s0?s0.customer:_importCust(),title:s0?s0.name:'お客様打合せ',
+      attendees:s0?(s0.attendees||''):'',next:s0&&s0.interval?_addDays(_todayStr(),s0.interval):'',raw:'',rows:null};}
+  const d=_mtDraft;
   const rowsHtml=(d.rows||[]).map((r,i)=>`<tr>
     <td><input class="me-in" style="width:90px;" value="${_e9(r.kind==='machine'?r.code:r.name)}" placeholder="機種/トピック" onchange="_mtSetRow(${i},'target',this.value)"></td>
     <td><select class="me-in" onchange="_mtSetRow(${i},'cat',this.value)">${MT_CATS.map(c=>`<option${r.cat===c?' selected':''}>${c}</option>`).join('')}</select></td>
@@ -149,10 +249,15 @@ function _mtInputHtml(){
     <td><input class="me-in" type="date" value="${_e9(r.due)}" onchange="_mtSetRow(${i},'due',this.value)"></td>
     <td class="c"><button class="btn btn-sm" style="padding:0 6px;" onclick="_mtDraft.rows.splice(${i},1);renderMeetings()">✕</button></td></tr>`).join('');
   return `
+    <div class="pt-bar">${_crmBarHtml()}</div>
     <div class="pt-wrap" style="max-height:none;padding:12px;margin-bottom:10px;">
+      <div style="display:flex;gap:8px;align-items:end;margin-bottom:8px;">
+        <label class="me-f" style="flex:1;">会議の種類<select class="me-in" onchange="_mtPickKind(this.value)">${_mtKindOptions(d.seriesId)}</select></label>
+        <button class="btn btn-sm" onclick="openSeriesManager()">📅 定例を追加・編集</button>
+      </div>
       <div class="me-grid" style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px 12px;">
-        <label class="me-f">会議日<input type="date" class="me-in" value="${_e9(d.date)}" onchange="_mtDraft.date=this.value"></label>
-        <label class="me-f">得意先<select class="me-in" onchange="_mtDraft.customer=this.value">${_custOptions(d.customer)}</select></label>
+        <label class="me-f">会議日<input type="date" class="me-in" value="${_e9(d.date)}" onchange="_mtDraft.date=this.value;const s=_mtSeries().find(x=>x.id===_mtDraft.seriesId);if(s&&s.interval){_mtDraft.next=_addDays(this.value,s.interval);const el=document.getElementById('mt-raw');if(el)_mtDraft.raw=el.value;renderMeetings();}"></label>
+        <label class="me-f">${d.kind==='internal'?'機種の得意先':'得意先'}<select class="me-in" onchange="_mtDraft.customer=this.value">${_custOptions(d.customer)}</select></label>
         <label class="me-f">会議名<input class="me-in" value="${_e9(d.title)}" onchange="_mtDraft.title=this.value"></label>
         <label class="me-f">参加者<input class="me-in" value="${_e9(d.attendees)}" placeholder="例: 資材課 〇〇様" onchange="_mtDraft.attendees=this.value"></label>
         <label class="me-f">次回日程<input type="date" class="me-in" value="${_e9(d.next)}" onchange="_mtDraft.next=this.value"></label>
@@ -199,7 +304,7 @@ function _mtSaveDraft(){
   const d=_mtDraft;if(!d||!d.rows||!d.rows.length){showToast('⚠️ 行がありません');return;}
   const el=document.getElementById('mt-raw');if(el)d.raw=el.value;
   const cid=d.customer||'fuji';
-  const meeting={id:'mt'+Date.now(),date:d.date,customer:cid,title:d.title,attendees:d.attendees,next:d.next,raw:d.raw,
+  const meeting={id:'mt'+Date.now(),date:d.date,customer:cid,kind:d.kind||'customer',seriesId:d.seriesId||'',title:d.title,attendees:d.attendees,next:d.next,raw:d.raw,
     rows:d.rows.map(r=>Object.assign({},r,{key:r.kind==='machine'&&r.code?_ikey(r.code,cid):''}))};
   let nTodo=0,nApply=0;
   const addTodo=(text,key,topic,due)=>{
@@ -227,13 +332,14 @@ function _mtSaveDraft(){
   if(nApply)saveToGAS('定例の内容を機種データへ反映');
   addLog(`📝 議事録を保存: ${d.date} ${d.title}（${meeting.rows.length}行／TODO ${nTodo}件／反映 ${nApply}件）`);
   showToast(`✅ 保存しました（TODO ${nTodo}件・機種データ反映 ${nApply}件）`,5000);
+  if(state.config.crmAutoPush!==false&&_crmStatus&&_crmStatus.connected)_crmPush(meeting);
   _mtDraft=null;_mtTab='know';renderMeetings();
 }
 
 /* 機種別ナレッジ: 全議事録の行を機種・トピックごとに新しい順で */
 function _mtEntries(){
   const out=[];
-  _mt.meetings.filter(m=>_custMatch(m.customer||'fuji')).forEach(m=>(m.rows||[]).forEach(r=>out.push(Object.assign({},r,{mdate:m.date,mtitle:m.title,customer:m.customer||'fuji'}))));
+  _mt.meetings.filter(m=>_custMatch(m.customer||'fuji')).forEach(m=>(m.rows||[]).forEach(r=>out.push(Object.assign({},r,{mdate:m.date,mtitle:(m.kind==='internal'?'🏢 ':'')+m.title,customer:m.customer||'fuji'}))));
   return out;
 }
 function _mtKnowHtml(){
@@ -245,8 +351,8 @@ function _mtKnowHtml(){
   let body='';
   keys.forEach(k=>{
     const list=groups[k].sort((a,b)=>String(b.mdate).localeCompare(String(a.mdate)));
-    body+=`<tr class="pt-sec"><td colspan="8">${_e9(k)}（${list.length}件）</td></tr>`;
-    list.forEach(e=>{body+=`<tr><td class="c pt-cur">${_e9(e.mdate)}</td><td>${_e9(e.cat)}</td><td style="white-space:normal;min-width:320px;">${_e9(e.text)}</td>
+    body+=`<tr class="pt-sec"><td colspan="9">${_e9(k)}（${list.length}件）</td></tr>`;
+    list.forEach(e=>{body+=`<tr><td class="c pt-cur">${_e9(e.mdate)}</td><td class="spec" style="max-width:150px;">${_e9(e.mtitle||'')}</td><td>${_e9(e.cat)}</td><td style="white-space:normal;min-width:320px;">${_e9(e.text)}</td>
       <td class="num">${_e9(e.fc&&e.fc.low||'')}</td><td class="num">${_e9(e.fc&&e.fc.mid||'')}</td><td class="num">${_e9(e.fc&&e.fc.high||'')}</td>
       <td class="c">${_e9(e.date||'')}</td><td class="c">${e.todo?'✅':''}</td></tr>`;});
   });
@@ -254,8 +360,8 @@ function _mtKnowHtml(){
       oninput="clearTimeout(window._mtT);window._mtT=setTimeout(()=>{_mtTerm=this.value;renderMeetings();const el=document.getElementById('mt-q');el.focus();el.setSelectionRange(el.value.length,el.value.length);},250)">
     <button class="btn btn-sm" onclick="_ptPrint('機種別ナレッジ','mt-know')">🖨 印刷</button></div>
     <div class="pt-info">${all.length}件。議事録の内容を機種・トピックごとに新しい順でまとめています。黄色が会議日。</div>
-    <div class="pt-wrap" id="mt-know"><table class="pt"><thead><tr><th class="pt-cur">会議日</th><th>区分</th><th>内容</th><th>予測:下</th><th>予測:中</th><th>予測:上</th><th>時期</th><th>TODO</th></tr></thead>
-    <tbody>${body||'<tr><td colspan="8" class="c same" style="padding:20px;">まだ議事録がありません。「議事録入力」から登録してください。</td></tr>'}</tbody></table></div>`;
+    <div class="pt-wrap" id="mt-know"><table class="pt"><thead><tr><th class="pt-cur">会議日</th><th>会議</th><th>区分</th><th>内容</th><th>予測:下</th><th>予測:中</th><th>予測:上</th><th>時期</th><th>TODO</th></tr></thead>
+    <tbody>${body||'<tr><td colspan="9" class="c same" style="padding:20px;">まだ議事録がありません。「議事録入力」から登録してください。</td></tr>'}</tbody></table></div>`;
 }
 
 /* TODO */
@@ -300,13 +406,14 @@ function _mtNewTodo(){
 function _mtListHtml(){
   const list=_mt.meetings.filter(m=>_custMatch(m.customer||'fuji'));
   return `<div class="pt-info">${list.length}件の議事録。行クリックで内容（貼り付けた元メモ）を表示します。</div>
-    <div class="pt-wrap"><table class="pt"><thead><tr><th class="pt-cur">会議日</th><th>得意先</th><th>会議名</th><th>参加者</th><th>行数</th><th>機種</th><th>次回</th><th></th></tr></thead><tbody>
-    ${list.map(m=>`<tr class="click" onclick="_mtShow('${m.id}')"><td class="c pt-cur">${_e9(m.date)}</td><td>${_e9(_custName(m.customer||'fuji'))}</td><td class="name">${_e9(m.title)}</td>
+    <div class="pt-wrap"><table class="pt"><thead><tr><th class="pt-cur">会議日</th><th>種類</th><th>得意先</th><th>会議名</th><th>参加者</th><th>行数</th><th>機種</th><th>次回</th><th>CRM</th><th></th></tr></thead><tbody>
+    ${list.map(m=>`<tr class="click" onclick="_mtShow('${m.id}')"><td class="c pt-cur">${_e9(m.date)}</td><td>${m.kind==='internal'?'🏢 社内':m.seriesId&&!/^__/.test(m.seriesId)?'📅 定例':'🤝 お客様'}</td><td>${_e9(m.kind==='internal'?'—':_custName(m.customer||'fuji'))}</td><td class="name">${_e9(m.title)}</td>
       <td>${_e9(m.attendees||'')}</td><td class="num">${(m.rows||[]).length}</td>
       <td class="spec" style="max-width:260px;">${_e9([...new Set((m.rows||[]).filter(r=>r.kind==='machine').map(r=>r.code))].join(', '))}</td>
       <td class="c">${_e9(m.next||'')}</td>
+      <td class="c" onclick="event.stopPropagation()">${m.crm?`<span class="st st-green" style="padding:0 6px;" title="${_e9(m.crm.meetingId)}">記録済</span>`:m.crmError?`<button class="btn btn-sm" style="padding:0 6px;color:#dc2626;" title="${_e9(m.crmError)}" onclick="_mtResendCrm('${m.id}')">再送</button>`:`<button class="btn btn-sm" style="padding:0 6px;" onclick="_mtResendCrm('${m.id}')">送信</button>`}</td>
       <td class="c" onclick="event.stopPropagation()"><button class="btn btn-sm" style="padding:0 6px;" onclick="_mtDelMeeting('${m.id}')">削除</button></td></tr>`).join('')
-      ||'<tr><td colspan="8" class="c same" style="padding:20px;">まだ議事録がありません</td></tr>'}</tbody></table></div>`;
+      ||'<tr><td colspan="10" class="c same" style="padding:20px;">まだ議事録がありません</td></tr>'}</tbody></table></div>`;
 }
 function _mtShow(id){
   const m=_mt.meetings.find(x=>x.id===id);if(!m)return;

@@ -884,6 +884,118 @@ function saveStore(name, json) {
   finally { lock.releaseLock(); }
 }
 
+/* ============================================================
+   自作CRM（GAS-CRM）への議事録連携（進捗管理 → CRM の一方向）
+   CRMのスプレッドシートに直接書き込む:
+     🎙️ Meetings   … 会議1件（要約・元メモ・次のアクション）
+     📝 Activities … 機種/トピックごとの要点（次のアクション＝TODO）
+     👥 Customers  … 得意先が無ければ作成して紐づけ
+   CRMのスプレッドシートIDはスクリプトプロパティ crmSpreadsheetId
+============================================================ */
+var CRM_SHEET = { customers: '👥 Customers', meetings: '🎙️ Meetings', activities: '📝 Activities' };
+
+function setCrmSpreadsheet(urlOrId) {
+  try {
+    var m = String(urlOrId || '').match(/\/d\/([A-Za-z0-9_\-]{20,})/);
+    var id = m ? m[1] : String(urlOrId || '').trim();
+    var ss = SpreadsheetApp.openById(id);
+    var missing = [CRM_SHEET.meetings, CRM_SHEET.activities, CRM_SHEET.customers].filter(function(n) { return !ss.getSheetByName(n); });
+    if (missing.length) return JSON.stringify({ success: false, error: 'CRMのシートが見つかりません: ' + missing.join(', ') });
+    PropertiesService.getScriptProperties().setProperty('crmSpreadsheetId', id);
+    return JSON.stringify({ success: true, name: ss.getName(), url: ss.getUrl() });
+  } catch (e) { return JSON.stringify({ success: false, error: e.message }); }
+}
+function getCrmStatus() {
+  var id = PropertiesService.getScriptProperties().getProperty('crmSpreadsheetId');
+  if (!id) return JSON.stringify({ connected: false });
+  try { var ss = SpreadsheetApp.openById(id); return JSON.stringify({ connected: true, name: ss.getName(), url: ss.getUrl() }); }
+  catch (e) { return JSON.stringify({ connected: false, error: e.message }); }
+}
+function _crmId(prefix) {
+  return prefix + '-' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyyMMdd') + '-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+}
+function _crmAppend(sh, obj) {
+  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  sh.appendRow(headers.map(function(h) { return obj[h] !== undefined ? obj[h] : ''; }));
+}
+function _crmDate(s) { var m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : (s || ''); }
+
+/**
+ * 議事録をCRMへ記録する。payload: {date,title,kind:'customer'|'internal',customerName,customerKw[],attendees,next,raw,
+ *   groups:[{label,lines[],todos:[{text,due}]}]}
+ */
+function pushMeetingToCrm(json) {
+  var lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    var p = JSON.parse(json);
+    var id = PropertiesService.getScriptProperties().getProperty('crmSpreadsheetId');
+    if (!id) return JSON.stringify({ success: false, error: 'CRMのスプレッドシートが未設定です（定例・TODO → CRM連携の設定）' });
+    var ss = SpreadsheetApp.openById(id);
+    var me = Session.getActiveUser().getEmail();
+    var now = new Date();
+
+    // 得意先の紐づけ（社内打合せは紐づけない）
+    var customerId = '';
+    if (p.kind !== 'internal' && p.customerName) {
+      var cs = ss.getSheetByName(CRM_SHEET.customers);
+      var v = cs.getDataRange().getValues(), h = v[0], iId = h.indexOf('customer_id'), iName = h.indexOf('company_name');
+      var kws = [p.customerName].concat(p.customerKw || []).filter(String);
+      for (var r = 1; r < v.length && !customerId; r++) {
+        var nm = String(v[r][iName] || '');
+        if (kws.some(function(k) { return nm.indexOf(k) >= 0 || k.indexOf(nm) >= 0 && nm; })) customerId = String(v[r][iId]);
+      }
+      if (!customerId) {
+        customerId = _crmId('CUS');
+        _crmAppend(cs, { customer_id: customerId, company_name: p.customerName, status: 'ACTIVE', assigned_user: me,
+          notes: '進捗管理システムの定例から自動作成', last_contact_date: _crmDate(p.date), created_at: now, updated_at: now });
+      }
+    }
+
+    var allTodos = [];
+    (p.groups || []).forEach(function(g) { (g.todos || []).forEach(function(t) { allTodos.push(t); }); });
+    var dues = allTodos.map(function(t) { return t.due; }).filter(String).sort();
+    var summary = (p.groups || []).map(function(g) { return '■' + g.label + '\n' + g.lines.map(function(l) { return '・' + l; }).join('\n'); }).join('\n\n');
+
+    // 🎙️ Meetings
+    var meetingId = _crmId('MTG');
+    _crmAppend(ss.getSheetByName(CRM_SHEET.meetings), {
+      meeting_id: meetingId, title: p.title + (p.attendees ? '（' + p.attendees + '）' : ''), meeting_date: _crmDate(p.date),
+      source: '進捗管理システム', status: customerId ? 'LINKED' : 'UNLINKED', customer_id: customerId,
+      company_name_guess: p.kind === 'internal' ? '社内' : (p.customerName || ''), transcript: p.raw || '', summary: summary,
+      extracted_json: JSON.stringify({ groups: p.groups, next: p.next }),
+      next_action: allTodos.slice(0, 15).map(function(t) { return t.text; }).join(' ／ '),
+      next_action_date: _crmDate(dues[0] || p.next || ''), assigned_user: me, created_at: now, updated_at: now
+    });
+
+    // 📝 Activities（機種・トピックごと）
+    var act = ss.getSheetByName(CRM_SHEET.activities), n = 0;
+    (p.groups || []).forEach(function(g) {
+      var gd = (g.todos || []).map(function(t) { return t.due; }).filter(String).sort();
+      _crmAppend(act, {
+        activity_id: _crmId('ACT'), customer_id: customerId, deal_id: '', type: p.kind === 'internal' ? 'OTHER' : 'MEETING',
+        activity_date: _crmDate(p.date), subject: p.title + '｜' + g.label, content: g.lines.join('\n'),
+        next_action: (g.todos || []).map(function(t) { return t.text; }).join(' ／ '), next_action_date: _crmDate(gd[0] || ''),
+        assigned_user: me, created_at: now
+      });
+      n++;
+    });
+    if (customerId) {
+      try {
+        var cs2 = ss.getSheetByName(CRM_SHEET.customers), v2 = cs2.getDataRange().getValues(), h2 = v2[0];
+        for (var r2 = 1; r2 < v2.length; r2++) if (String(v2[r2][h2.indexOf('customer_id')]) === customerId) {
+          var il = h2.indexOf('last_contact_date'), iu = h2.indexOf('updated_at');
+          if (il >= 0) cs2.getRange(r2 + 1, il + 1).setValue(_crmDate(p.date));
+          if (iu >= 0) cs2.getRange(r2 + 1, iu + 1).setValue(now);
+          break;
+        }
+      } catch (e) {}
+    }
+    return JSON.stringify({ success: true, meetingId: meetingId, activities: n, customerId: customerId, url: ss.getUrl() });
+  } catch (e) {
+    return JSON.stringify({ success: false, error: e.message });
+  } finally { lock.releaseLock(); }
+}
+
 /**
  * 連携スプレッドシートの全シートの表示値を返す（機種DB取込用）。
  * レイアウト判定・列の対応付けはクライアント側で行う。

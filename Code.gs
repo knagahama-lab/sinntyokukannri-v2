@@ -115,7 +115,7 @@ function getPriceImpactData() {
  * 書かない(例: 'image/'+'*' のように分割する)。
  */
 function getAppBundle() {
-  var files = ['appjs1', 'appjs2', 'appjs3', 'appjs4', 'appjs5', 'appjs6', 'appjs7', 'appjs8'];
+  var files = ['appjs1', 'appjs2', 'appjs3', 'appjs4', 'appjs5', 'appjs6', 'appjs7', 'appjs8', 'appjs9'];
   var code = files.map(function(name) {
     var raw = HtmlService.createHtmlOutputFromFile(name).getContent();
     // 各ファイルは HtmlService.createHtmlOutputFromFile() が
@@ -737,6 +737,22 @@ function syncToSpreadsheet() {
   result['DB_得意先'] = _writeDbSheet(ss, 'DB_得意先', ['ID', '得意先名', '宛先キーワード'],
     custs.map(function(c) { return [c.id, c.name, (c.kw || []).join(', ')]; }), now);
 
+  // ⑥ 議事録（定例打ち合わせ）と TODO
+  var mt = {}; try { mt = JSON.parse(loadStore('議事録') || '{}'); if (mt.__error) mt = {}; } catch (e) {}
+  var r6 = [];
+  (mt.meetings || []).forEach(function(m) {
+    (m.rows || []).forEach(function(r) {
+      var fc = r.fc || {};
+      r6.push([m.date || '', custName(m.customer || 'fuji'), m.title || '', r.kind === 'machine' ? r.code : '', r.kind === 'topic' ? r.name : '',
+        r.cat || '', r.text || '', fc.low || '', fc.mid || '', fc.high || '', r.date || '', r.todo ? '○' : '']);
+    });
+  });
+  result['DB_議事録'] = _writeDbSheet(ss, 'DB_議事録', ['会議日', '得意先', '会議名', '機種', 'トピック', '区分', '内容', '予測:下', '予測:中', '予測:上', '時期', 'TODO'], r6, now);
+  var r7 = (mt.todos || []).map(function(t) {
+    return [t.done ? '完了' : '未完了', t.due || '', t.text || '', t.key ? dispKey(t.key) : (t.topic || ''), custName(t.customer || 'fuji'), t.owner || '', t.created || '', t.doneAt || ''];
+  });
+  result['DB_TODO'] = _writeDbSheet(ss, 'DB_TODO', ['状態', '期限', '内容', '機種/トピック', '得意先', '担当', '登録日', '完了日'], r7, now);
+
   props.setProperty('lastSpreadsheetSyncAt', now);
   Logger.log('✅ スプレッドシートへ書き出し完了 ' + JSON.stringify(result) + ' → ' + ss.getUrl());
   return JSON.stringify({ success: true, url: ss.getUrl(), counts: result, at: now });
@@ -840,6 +856,32 @@ function setupSpreadsheetSyncTrigger() {
   ScriptApp.getProjectTriggers().forEach(function(t) { if (t.getHandlerFunction() === 'syncToSpreadsheet') ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('syncToSpreadsheet').timeBased().everyDays(1).atHour(7).create();
   return syncToSpreadsheet();
+}
+
+/* ============================================================
+   汎用ストア（議事録・TODO など増え続けるデータを Drive の JSON に保存）
+   name ごとに「営業進捗管理_<name>.json」を作成する
+============================================================ */
+function _storeFile(name) {
+  var props = PropertiesService.getScriptProperties();
+  var pk = 'storeFile_' + name;
+  var id = props.getProperty(pk);
+  if (id) { try { var f = DriveApp.getFileById(id); if (!f.isTrashed()) return f; } catch (e) {} }
+  var roots = DriveApp.getFoldersByName('営業進捗管理_取込資料');
+  var folder = roots.hasNext() ? roots.next() : DriveApp.createFolder('営業進捗管理_取込資料');
+  var file = folder.createFile('営業進捗管理_' + name + '.json', '{}', 'application/json');
+  props.setProperty(pk, file.getId());
+  return file;
+}
+function loadStore(name) {
+  try { return _storeFile(name).getBlob().getDataAsString('UTF-8') || '{}'; }
+  catch (e) { return JSON.stringify({ __error: e.message }); }
+}
+function saveStore(name, json) {
+  var lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try { JSON.parse(json); _storeFile(name).setContent(json); return JSON.stringify({ success: true }); }
+  catch (e) { return JSON.stringify({ success: false, error: e.message }); }
+  finally { lock.releaseLock(); }
 }
 
 /**

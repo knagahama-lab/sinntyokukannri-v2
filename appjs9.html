@@ -1,0 +1,342 @@
+<script>
+/* ============================================================
+   定例打ち合わせ（お客様資材課との2週間ごとの定例）の議事録・TODO
+   ・メモを貼り付け →「自動振り分け」で機種ごと・区分ごとの表に分解
+   ・表で確認・修正して保存 → 機種別ナレッジ／TODO に自動で整理
+   ・適合済み → 量産構成表の依頼TODO、質問・「→〇〇を貰う」等 → TODO
+   ・販売時期・予測台数(下/中/上)は機種データ(手入力の上書き)へ反映
+   保存先: Drive「営業進捗管理_議事録.json」（Code.gs loadStore/saveStore）
+   ※ このファイルの文字列にスラッシュ2つやスラッシュ+アスタリスクを書かないこと
+============================================================ */
+const MT_STORE='議事録';
+let _mt={meetings:[],todos:[]}, _mtLoaded=false, _mtLoading=false;
+let _mtTab='input', _mtDraft=null, _mtTerm='', _mtTodoFilter='open';
+const MT_CATS=['販売予測','販売時期','適合','構成表','在庫・終息','注文','見本機日程','エコ・リユース','課題・質問','部品・メーカー','メモ'];
+function _e9(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+function _mtLoad(cb){
+  if(_mtLoaded){cb&&cb();return;}
+  if(typeof google==='undefined'||!google.script){_mtLoaded=true;cb&&cb();return;}
+  if(_mtLoading)return; _mtLoading=true;
+  google.script.run.withSuccessHandler(res=>{
+    try{const o=JSON.parse(res||'{}');if(!o.__error){_mt.meetings=o.meetings||[];_mt.todos=o.todos||[];}}catch(e){}
+    _mtLoaded=true;_mtLoading=false;cb&&cb();
+  }).withFailureHandler(()=>{_mtLoaded=true;_mtLoading=false;cb&&cb();}).loadStore(MT_STORE);
+}
+function _mtSave(){
+  if(typeof google==='undefined'||!google.script)return;
+  google.script.run.withSuccessHandler(res=>{try{const r=JSON.parse(res);if(!r.success)showToast('⚠️ 議事録の保存に失敗: '+r.error,6000);}catch(e){}})
+    .withFailureHandler(err=>showToast('⚠️ 議事録の保存に失敗: '+err.message,6000)).saveStore(MT_STORE,JSON.stringify(_mt));
+}
+
+/* ---------- メモの自動振り分け ---------- */
+const _MT_CODE=/(?:^|[^A-Za-z0-9])([A-Z]{1,2}\d{2,3}[A-Z]?(?:甘)?)(?![0-9])/g;
+function _mtCodes(t){const out=[];let m;_MT_CODE.lastIndex=0;while((m=_MT_CODE.exec(t)))if(!out.includes(m[1]))out.push(m[1]);return out;}
+function _mtClassify(t){
+  if(/[?？]/.test(t))return '課題・質問';
+  if(/適合/.test(t))return '適合';
+  if(/構成表/.test(t))return '構成表';
+  if(/見本機|マスタ\s*ロム|マスターロム|営業所着/.test(t))return '見本機日程';
+  if(/販売/.test(t)&&/\d{1,2}月/.test(t))return '販売時期';
+  if(/[\d,]{3,}\s*台/.test(t))return '販売予測';
+  if(/在庫|仕掛|残数|終息|PCB/.test(t))return '在庫・終息';
+  if(/注文/.test(t))return '注文';
+  if(/リユース|りゆーす|エコ|新品/.test(t))return 'エコ・リユース';
+  return 'メモ';
+}
+function _mtForecast(t){
+  const n=s=>Number(String(s).replace(/,/g,''));
+  const hi=t.match(/上\s*([\d,]{3,})/),lo=t.match(/下\s*([\d,]{3,})/),mid=t.match(/中\s*([\d,]{3,})/),any=t.match(/([\d,]{3,})\s*台/);
+  if(!hi&&!lo&&!mid&&!any)return null;
+  return {low:lo?n(lo[1]):'',mid:mid?n(mid[1]):(any?n(any[1]):''),high:hi?n(hi[1]):''};
+}
+// 「1月11日」「11月9日」「1/11」「12月」→ 日付（会議日より3か月以上前の月は翌年とみなす）
+function _mtDate(t,base){
+  const b=base?new Date(base):new Date();
+  let mo,d;
+  let m=t.match(/(\d{1,2})月(\d{1,2})日/)||t.match(/(?:^|[^\d])(\d{1,2})\/(\d{1,2})(?:[^\d]|$)/);
+  if(m){mo=+m[1];d=+m[2];}else{m=t.match(/(\d{1,2})月/);if(!m)return '';mo=+m[1];d=1;}
+  if(mo<1||mo>12||d<1||d>31)return '';
+  let y=b.getFullYear();if(mo<b.getMonth()+1-3)y++;
+  return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+function _mtIsTodo(t,cat){
+  if(cat==='課題・質問'||cat==='構成表')return true;
+  return /→[^。]*?(貰う|もらう|依頼する|を依頼|確認する|を確認|把握する|調べる|情報収集|聞く|回答する|連絡する)|必要がある|把握する|情報収集|検討する/.test(t);
+}
+function _mtTopicCat(t){return /(東芝|ケル|板橋|三球|キョウデン|オムロン|ニデック|カーライル|LED|ドライバ|キー|部品|メーカー|ピン|コネクタ)/.test(t)?'部品・メーカー':'メモ';}
+
+function _mtParse(raw,base){
+  const rows=[];let ctx=null,next='',prevBlank=true;
+  const mk=(code,text,extra)=>{
+    const cat=(extra&&extra.cat)||_mtClassify(text);
+    const r={id:'r'+Math.random().toString(36).slice(2,9),kind:'machine',code,name:'',cat,text,fc:_mtForecast(text),date:'',todo:_mtIsTodo(text,cat),due:'',apply:false};
+    if(cat==='販売時期'||cat==='見本機日程'||(extra&&extra.month))r.date=_mtDate(text,base)||(extra&&extra.monthDate)||'';
+    if(cat==='販売予測'&&!r.fc)r.fc=_mtForecast(text);
+    // 「本体率」「うち本体」は予測台数として反映しない
+    if(/本体/.test(text))r.fc=null;
+    r.apply=!!((cat==='販売時期'&&r.date)||(r.fc&&r.fc.mid));
+    return r;
+  };
+  const topic=(name,text)=>{const cat=/[?？]/.test(text)?'課題・質問':_mtTopicCat(name+text);
+    return {id:'r'+Math.random().toString(36).slice(2,9),kind:'topic',code:'',name,cat,text,fc:null,date:'',todo:_mtIsTodo(text,cat),due:'',apply:false};};
+  String(raw||'').split(/\r?\n/).forEach(line=>{
+    const t=line.replace(/[\s　]+$/,'').trim();
+    if(!t){prevBlank=true;return;}
+    const indented=/^[\s　]/.test(line);
+    const nx=t.match(/^次回\s*(.+)/);
+    if(nx){next=_mtDate(nx[1],base);rows.push(topic('次回打ち合わせ',t));prevBlank=false;return;}
+    const codes=_mtCodes(t);
+    const startsCode=/^[A-Z]{1,2}\d{2,3}/.test(t);
+    const monthHead=!indented&&t.match(/^(\d{1,2})月(?!\d{0,2}日)/);
+    if(monthHead){
+      const md=_mtDate(monthHead[1]+'月',base);
+      ctx={type:'month',month:+monthHead[1],monthDate:md,codes,last:codes};
+      codes.forEach(c=>rows.push(mk(c,t,{cat:'販売時期',month:true,monthDate:md})));
+      prevBlank=false;return;
+    }
+    if(!indented&&startsCode){
+      ctx={type:'machine',codes,last:codes};
+      const rest=t.replace(/[A-Z]{1,2}\d{2,3}[A-Z]?(?:甘)?/g,'').replace(/^[\s　,、（(]+|[)）]+$/g,'').trim();
+      if(rest)codes.forEach(c=>rows.push(mk(c,t)));
+      prevBlank=false;return;
+    }
+    // 見出し直後の短い行（インデント無し）は続きとみなす
+    if(!indented&&ctx&&ctx.type==='machine'&&!prevBlank&&t.length<=12&&!codes.length){ctx.codes.forEach(c=>rows.push(mk(c,t)));return;}
+    if(!indented){ctx={type:'topic',name:t.slice(0,40)};rows.push(topic(ctx.name,t));prevBlank=false;return;}
+    // インデント行
+    if(ctx&&ctx.type==='month'){
+      if(codes.length){ctx.last=codes;codes.forEach(c=>{const r=mk(c,`${ctx.month}月: `+t,{month:true,monthDate:ctx.monthDate});if(r.cat==='メモ'){r.cat='販売時期';r.apply=!!r.date;}rows.push(r);});}
+      else if(prevBlank){ctx={type:'topic',name:t.replace(/^[※\s　]+/,'').slice(0,40)};rows.push(topic(ctx.name,t));}
+      else (ctx.last.length?ctx.last:['']).forEach(c=>rows.push(c?mk(c,t):topic('その他',t)));
+      prevBlank=false;return;
+    }
+    if(ctx&&ctx.type==='machine'){(codes.length?codes:ctx.codes).forEach(c=>rows.push(mk(c,t)));prevBlank=false;return;}
+    if(ctx&&ctx.type==='topic'){rows.push(topic(ctx.name,t));prevBlank=false;return;}
+    rows.push(topic('その他',t));prevBlank=false;
+  });
+  return {rows,next};
+}
+
+/* ---------- 画面 ---------- */
+function renderMeetings(){
+  if(!_mtLoaded){document.getElementById('page-meetings').innerHTML='<div class="pt-info" style="padding:20px;">議事録を読み込み中...</div>';_mtLoad(renderMeetings);return;}
+  if(!_mdbLoadStarted&&typeof _loadModelDB==='function')_loadModelDB();
+  const openTodo=_mt.todos.filter(t=>!t.done&&_custMatch(t.customer||'fuji')).length;
+  const tabs=[['input','✍️ 議事録入力'],['know','📚 機種別ナレッジ'],['todo',`✅ TODO（${openTodo}）`],['list','🗂 議事録一覧']];
+  const head=`<div class="pt-bar">${tabs.map(([k,l])=>`<button class="pt-chip${_mtTab===k?' on':''}" onclick="_mtTab='${k}';renderMeetings()">${l}</button>`).join('')}</div>`;
+  let body='';
+  if(_mtTab==='input')body=_mtInputHtml();
+  else if(_mtTab==='know')body=_mtKnowHtml();
+  else if(_mtTab==='todo')body=_mtTodoHtml();
+  else body=_mtListHtml();
+  document.getElementById('page-meetings').innerHTML=head+body;
+}
+
+function _mtInputHtml(){
+  const d=_mtDraft||{date:_todayStr(),customer:_importCust(),title:'資材課 定例打ち合わせ',attendees:'',next:'',raw:'',rows:null};
+  _mtDraft=d;
+  const rowsHtml=(d.rows||[]).map((r,i)=>`<tr>
+    <td><input class="me-in" style="width:90px;" value="${_e9(r.kind==='machine'?r.code:r.name)}" placeholder="機種/トピック" onchange="_mtSetRow(${i},'target',this.value)"></td>
+    <td><select class="me-in" onchange="_mtSetRow(${i},'cat',this.value)">${MT_CATS.map(c=>`<option${r.cat===c?' selected':''}>${c}</option>`).join('')}</select></td>
+    <td><input class="me-in" style="min-width:300px;" value="${_e9(r.text)}" onchange="_mtSetRow(${i},'text',this.value)"></td>
+    <td><input class="me-in" style="width:64px;" value="${_e9(r.fc?r.fc.low:'')}" onchange="_mtSetFc(${i},'low',this.value)"></td>
+    <td class="pt-cur"><input class="me-in" style="width:64px;" value="${_e9(r.fc?r.fc.mid:'')}" onchange="_mtSetFc(${i},'mid',this.value)"></td>
+    <td><input class="me-in" style="width:64px;" value="${_e9(r.fc?r.fc.high:'')}" onchange="_mtSetFc(${i},'high',this.value)"></td>
+    <td><input class="me-in" type="date" value="${_e9(r.date)}" onchange="_mtSetRow(${i},'date',this.value)"></td>
+    <td class="c"><input type="checkbox" ${r.apply?'checked':''} ${r.kind==='machine'?'':'disabled'} onchange="_mtSetRow(${i},'apply',this.checked)"></td>
+    <td class="c"><input type="checkbox" ${r.todo?'checked':''} onchange="_mtSetRow(${i},'todo',this.checked)"></td>
+    <td><input class="me-in" type="date" value="${_e9(r.due)}" onchange="_mtSetRow(${i},'due',this.value)"></td>
+    <td class="c"><button class="btn btn-sm" style="padding:0 6px;" onclick="_mtDraft.rows.splice(${i},1);renderMeetings()">✕</button></td></tr>`).join('');
+  return `
+    <div class="pt-wrap" style="max-height:none;padding:12px;margin-bottom:10px;">
+      <div class="me-grid" style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px 12px;">
+        <label class="me-f">会議日<input type="date" class="me-in" value="${_e9(d.date)}" onchange="_mtDraft.date=this.value"></label>
+        <label class="me-f">得意先<select class="me-in" onchange="_mtDraft.customer=this.value">${_custOptions(d.customer)}</select></label>
+        <label class="me-f">会議名<input class="me-in" value="${_e9(d.title)}" onchange="_mtDraft.title=this.value"></label>
+        <label class="me-f">参加者<input class="me-in" value="${_e9(d.attendees)}" placeholder="例: 資材課 〇〇様" onchange="_mtDraft.attendees=this.value"></label>
+        <label class="me-f">次回日程<input type="date" class="me-in" value="${_e9(d.next)}" onchange="_mtDraft.next=this.value"></label>
+      </div>
+      <label class="me-f" style="margin-top:10px;">メモ（Obsidianのメモをそのまま貼り付け可。機種コードの行ごとに自動で振り分けます）
+        <textarea id="mt-raw" class="me-in" rows="10" style="font-family:inherit;" placeholder="A87&#10;　14,000台　変更なし&#10;A84B&#10;　3388台 ほぼクローズ&#10;E64&#10;　適合済み&#10;　1月11日販売">${_e9(d.raw)}</textarea></label>
+      <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+        <button class="btn btn-primary btn-sm" onclick="_mtAutoSplit()">⚡ 自動振り分け</button>
+        <button class="btn btn-sm" onclick="_mtAddRow()">＋ 行を追加（手入力）</button>
+        <span style="flex:1;"></span>
+        <button class="btn btn-sm" onclick="if(confirm('入力中の内容を消去しますか？')){_mtDraft=null;renderMeetings();}">クリア</button>
+      </div>
+    </div>
+    ${d.rows?`
+    <div class="pt-info">${d.rows.length}行。区分・機種は修正できます。「反映」=販売時期・予測台数を機種データへ反映、「TODO」=TODOに登録（期限が空なら次回日程）。適合済みの機種には「量産構成表を依頼」TODOを自動で追加します。</div>
+    <div class="pt-wrap"><table class="pt"><thead>
+      <tr><th rowspan="2">機種/トピック</th><th rowspan="2">区分</th><th rowspan="2">内容</th><th colspan="3">販売予測台数</th><th rowspan="2">時期</th><th rowspan="2">反映</th><th rowspan="2">TODO</th><th rowspan="2">期限</th><th rowspan="2"></th></tr>
+      <tr><th>下</th><th class="pt-cur">中</th><th>上</th></tr></thead>
+      <tbody>${rowsHtml||'<tr><td colspan="11" class="c same" style="padding:16px;">行がありません</td></tr>'}</tbody></table></div>
+    <div style="margin-top:10px;text-align:right;"><button class="btn btn-primary" onclick="_mtSaveDraft()">💾 議事録を保存して振り分ける</button></div>`:''}`;
+}
+function _mtAutoSplit(){
+  const raw=document.getElementById('mt-raw').value;
+  _mtDraft.raw=raw;
+  const p=_mtParse(raw,_mtDraft.date);
+  _mtDraft.rows=p.rows;
+  if(p.next&&!_mtDraft.next)_mtDraft.next=p.next;
+  renderMeetings();
+  showToast(`⚡ ${p.rows.length}行に振り分けました（機種 ${new Set(p.rows.filter(r=>r.kind==='machine').map(r=>r.code)).size}件）`);
+}
+function _mtAddRow(){
+  const el=document.getElementById('mt-raw');if(el)_mtDraft.raw=el.value;
+  (_mtDraft.rows=_mtDraft.rows||[]).push({id:'r'+Math.random().toString(36).slice(2,9),kind:'machine',code:'',name:'',cat:'メモ',text:'',fc:null,date:'',todo:false,due:'',apply:false});
+  renderMeetings();
+}
+function _mtSetRow(i,f,v){
+  const r=_mtDraft.rows[i];if(!r)return;
+  if(f==='target'){v=String(v).trim();if(/^[A-Z]{1,2}\d{2,3}/.test(v)){r.kind='machine';r.code=v;r.name='';}else{r.kind='topic';r.name=v;r.code='';r.apply=false;}renderMeetings();return;}
+  r[f]=v;
+}
+function _mtSetFc(i,f,v){const r=_mtDraft.rows[i];if(!r)return;r.fc=r.fc||{low:'',mid:'',high:''};r.fc[f]=v===''?'':Number(String(v).replace(/,/g,''));}
+
+function _mtSaveDraft(){
+  const d=_mtDraft;if(!d||!d.rows||!d.rows.length){showToast('⚠️ 行がありません');return;}
+  const el=document.getElementById('mt-raw');if(el)d.raw=el.value;
+  const cid=d.customer||'fuji';
+  const meeting={id:'mt'+Date.now(),date:d.date,customer:cid,title:d.title,attendees:d.attendees,next:d.next,raw:d.raw,
+    rows:d.rows.map(r=>Object.assign({},r,{key:r.kind==='machine'&&r.code?_ikey(r.code,cid):''}))};
+  let nTodo=0,nApply=0;
+  const addTodo=(text,key,topic,due)=>{
+    if(_mt.todos.some(t=>!t.done&&t.text===text&&t.key===key))return;
+    _mt.todos.push({id:'td'+Date.now()+Math.random().toString(36).slice(2,6),text,key:key||'',topic:topic||'',customer:cid,
+      due:due||d.next||'',owner:'',done:false,created:d.date,meetingId:meeting.id});
+    nTodo++;
+  };
+  meeting.rows.forEach(r=>{
+    if(r.todo)addTodo(r.text,r.key,r.kind==='topic'?r.name:'',r.due);
+    if(r.kind==='machine'&&r.key&&r.cat==='適合'&&/適合済/.test(r.text)){
+      const has=((state.configSheets[r.key]||{}).mass||{});
+      if(!has.req&&!has.got)addTodo('量産構成表を依頼（適合済み）',r.key,'',r.due);
+    }
+    if(r.kind==='machine'&&r.key&&r.apply){
+      const ov=state.modelOverrides[r.key]=state.modelOverrides[r.key]||{};
+      if(r.cat==='販売時期'&&r.date)ov.salesDate=r.date;
+      if(r.fc&&(r.fc.mid||r.fc.low||r.fc.high))ov.forecast={low:r.fc.low||'',mid:r.fc.mid||'',high:r.fc.high||'',at:d.date};
+      if(r.cat==='適合'){ov.compliance=r.text.replace(/^.*?適合/,'適合').slice(0,40);}
+      nApply++;
+    }
+  });
+  _mt.meetings.unshift(meeting);
+  _mtSave();
+  if(nApply)saveToGAS('定例の内容を機種データへ反映');
+  addLog(`📝 議事録を保存: ${d.date} ${d.title}（${meeting.rows.length}行／TODO ${nTodo}件／反映 ${nApply}件）`);
+  showToast(`✅ 保存しました（TODO ${nTodo}件・機種データ反映 ${nApply}件）`,5000);
+  _mtDraft=null;_mtTab='know';renderMeetings();
+}
+
+/* 機種別ナレッジ: 全議事録の行を機種・トピックごとに新しい順で */
+function _mtEntries(){
+  const out=[];
+  _mt.meetings.filter(m=>_custMatch(m.customer||'fuji')).forEach(m=>(m.rows||[]).forEach(r=>out.push(Object.assign({},r,{mdate:m.date,mtitle:m.title,customer:m.customer||'fuji'}))));
+  return out;
+}
+function _mtKnowHtml(){
+  const t=_mtTerm.trim().toLowerCase();
+  const all=_mtEntries().filter(e=>!t||((e.code||e.name)+' '+e.text+' '+e.cat).toLowerCase().includes(t));
+  const grp=e=>e.kind==='machine'?'■ '+e.code+((_mdbView(e.key)||{}).title?'　'+_mdbView(e.key).title:''):'■ '+(e.cat==='部品・メーカー'?'部品・メーカー: ':'')+e.name;
+  const groups={};all.forEach(e=>{(groups[grp(e)]=groups[grp(e)]||[]).push(e);});
+  const keys=Object.keys(groups).sort((a,b)=>{const am=/^■ [A-Z]/.test(a),bm=/^■ [A-Z]/.test(b);return am!==bm?(am?-1:1):a.localeCompare(b);});
+  let body='';
+  keys.forEach(k=>{
+    const list=groups[k].sort((a,b)=>String(b.mdate).localeCompare(String(a.mdate)));
+    body+=`<tr class="pt-sec"><td colspan="8">${_e9(k)}（${list.length}件）</td></tr>`;
+    list.forEach(e=>{body+=`<tr><td class="c pt-cur">${_e9(e.mdate)}</td><td>${_e9(e.cat)}</td><td style="white-space:normal;min-width:320px;">${_e9(e.text)}</td>
+      <td class="num">${_e9(e.fc&&e.fc.low||'')}</td><td class="num">${_e9(e.fc&&e.fc.mid||'')}</td><td class="num">${_e9(e.fc&&e.fc.high||'')}</td>
+      <td class="c">${_e9(e.date||'')}</td><td class="c">${e.todo?'✅':''}</td></tr>`;});
+  });
+  return `<div class="pt-bar"><input id="mt-q" class="pt-in" style="flex:1;min-width:220px;" placeholder="機種・部品・メーカー・キーワードで検索..." value="${_e9(_mtTerm)}"
+      oninput="clearTimeout(window._mtT);window._mtT=setTimeout(()=>{_mtTerm=this.value;renderMeetings();const el=document.getElementById('mt-q');el.focus();el.setSelectionRange(el.value.length,el.value.length);},250)">
+    <button class="btn btn-sm" onclick="_ptPrint('機種別ナレッジ','mt-know')">🖨 印刷</button></div>
+    <div class="pt-info">${all.length}件。議事録の内容を機種・トピックごとに新しい順でまとめています。黄色が会議日。</div>
+    <div class="pt-wrap" id="mt-know"><table class="pt"><thead><tr><th class="pt-cur">会議日</th><th>区分</th><th>内容</th><th>予測:下</th><th>予測:中</th><th>予測:上</th><th>時期</th><th>TODO</th></tr></thead>
+    <tbody>${body||'<tr><td colspan="8" class="c same" style="padding:20px;">まだ議事録がありません。「議事録入力」から登録してください。</td></tr>'}</tbody></table></div>`;
+}
+
+/* TODO */
+function _mtTodoHtml(){
+  const today=_todayStr();
+  const all=_mt.todos.filter(t=>_custMatch(t.customer||'fuji'));
+  const pass=t=>_mtTodoFilter==='open'?!t.done:_mtTodoFilter==='done'?t.done:_mtTodoFilter==='late'?(!t.done&&t.due&&t.due<today):true;
+  const list=all.filter(pass).sort((a,b)=>(a.done-b.done)||String(a.due||'9999').localeCompare(String(b.due||'9999')));
+  const label=t=>t.key?_dispKey(t.key):(t.topic||'—');
+  const rows=list.map(t=>{const late=!t.done&&t.due&&t.due<today;return `<tr>
+    <td class="c"><input type="checkbox" ${t.done?'checked':''} onchange="_mtToggleTodo('${t.id}',this.checked)"></td>
+    <td class="c pt-cur" style="${late?'color:#dc2626;':''}"><input type="date" class="me-in" style="width:130px;background:transparent;" value="${_e9(t.due||'')}" onchange="_mtTodoField('${t.id}','due',this.value)"></td>
+    <td style="white-space:normal;min-width:300px;${t.done?'text-decoration:line-through;color:#94a3b8;':''}">${_e9(t.text)}</td>
+    <td class="name">${_e9(label(t))}</td>
+    <td><input class="me-in" style="width:90px;" value="${_e9(t.owner||'')}" placeholder="担当" onchange="_mtTodoField('${t.id}','owner',this.value)"></td>
+    <td class="c">${_e9(t.created||'')}</td>
+    <td class="c"><button class="btn btn-sm" style="padding:0 6px;" onclick="_mtDelTodo('${t.id}')">削除</button></td></tr>`;}).join('');
+  const cnt=f=>all.filter(f).length;
+  return `<div class="pt-bar">
+      ${_ptChip('未完了',cnt(t=>!t.done),_mtTodoFilter==='open',"_mtTodoFilter='open';renderMeetings()")}
+      ${_ptChip('⚠️ 期限超過',cnt(t=>!t.done&&t.due&&t.due<today),_mtTodoFilter==='late',"_mtTodoFilter='late';renderMeetings()")}
+      ${_ptChip('完了',cnt(t=>t.done),_mtTodoFilter==='done',"_mtTodoFilter='done';renderMeetings()")}
+      ${_ptChip('すべて',all.length,_mtTodoFilter==='all',"_mtTodoFilter='all';renderMeetings()")}
+      <span style="flex:1;"></span>
+      <button class="btn btn-sm" onclick="_mtNewTodo()">＋ TODOを追加</button>
+      <button class="btn btn-sm" style="color:#16a34a;border-color:#16a34a;" onclick="_ptCsvDownload('TODO',['状態','期限','内容','機種/トピック','担当','登録日'],_mt.todos.map(t=>[t.done?'完了':'未完了',t.due,t.text,t.key?_dispKey(t.key):t.topic,t.owner,t.created]))">📥 CSV</button></div>
+    <div class="pt-info">${list.length}件。黄色が期限（赤字は期限超過）。チェックで完了。議事録の質問・「→〇〇を貰う」・適合済み機種の量産構成表依頼などから自動登録されます。</div>
+    <div class="pt-wrap"><table class="pt"><thead><tr><th>完了</th><th class="pt-cur">期限</th><th>内容</th><th>機種/トピック</th><th>担当</th><th>登録日</th><th></th></tr></thead>
+    <tbody>${rows||'<tr><td colspan="7" class="c same" style="padding:20px;">該当するTODOはありません</td></tr>'}</tbody></table></div>`;
+}
+function _mtToggleTodo(id,done){const t=_mt.todos.find(x=>x.id===id);if(!t)return;t.done=done;t.doneAt=done?_todayStr():'';_mtSave();renderMeetings();}
+function _mtTodoField(id,f,v){const t=_mt.todos.find(x=>x.id===id);if(!t)return;t[f]=v;_mtSave();}
+function _mtDelTodo(id){if(!confirm('このTODOを削除しますか？'))return;_mt.todos=_mt.todos.filter(x=>x.id!==id);_mtSave();renderMeetings();}
+function _mtNewTodo(){
+  const text=(prompt('TODOの内容')||'').trim();if(!text)return;
+  const code=(prompt('機種コード（無ければ空欄）')||'').trim();
+  _mt.todos.push({id:'td'+Date.now(),text,key:code?_ikey(code):'',topic:code?'':'手入力',customer:_importCust(),due:'',owner:'',done:false,created:_todayStr()});
+  _mtSave();renderMeetings();
+}
+
+/* 議事録一覧 */
+function _mtListHtml(){
+  const list=_mt.meetings.filter(m=>_custMatch(m.customer||'fuji'));
+  return `<div class="pt-info">${list.length}件の議事録。行クリックで内容（貼り付けた元メモ）を表示します。</div>
+    <div class="pt-wrap"><table class="pt"><thead><tr><th class="pt-cur">会議日</th><th>得意先</th><th>会議名</th><th>参加者</th><th>行数</th><th>機種</th><th>次回</th><th></th></tr></thead><tbody>
+    ${list.map(m=>`<tr class="click" onclick="_mtShow('${m.id}')"><td class="c pt-cur">${_e9(m.date)}</td><td>${_e9(_custName(m.customer||'fuji'))}</td><td class="name">${_e9(m.title)}</td>
+      <td>${_e9(m.attendees||'')}</td><td class="num">${(m.rows||[]).length}</td>
+      <td class="spec" style="max-width:260px;">${_e9([...new Set((m.rows||[]).filter(r=>r.kind==='machine').map(r=>r.code))].join(', '))}</td>
+      <td class="c">${_e9(m.next||'')}</td>
+      <td class="c" onclick="event.stopPropagation()"><button class="btn btn-sm" style="padding:0 6px;" onclick="_mtDelMeeting('${m.id}')">削除</button></td></tr>`).join('')
+      ||'<tr><td colspan="8" class="c same" style="padding:20px;">まだ議事録がありません</td></tr>'}</tbody></table></div>`;
+}
+function _mtShow(id){
+  const m=_mt.meetings.find(x=>x.id===id);if(!m)return;
+  _overlay('mt-show',`📝 ${_e9(m.date)} ${_e9(m.title)}`,`<div class="pt-info">得意先: ${_e9(_custName(m.customer||'fuji'))}　参加者: ${_e9(m.attendees||'—')}　次回: ${_e9(m.next||'—')}</div>
+    <pre style="white-space:pre-wrap;font-family:inherit;font-size:12.5px;background:#f8fafc;border:1px solid var(--border-light);border-radius:8px;padding:12px;max-height:60vh;overflow:auto;">${_e9(m.raw||'')}</pre>`,760);
+}
+function _mtDelMeeting(id){
+  if(!confirm('この議事録を削除しますか？（登録済みのTODOは残ります）'))return;
+  _mt.meetings=_mt.meetings.filter(x=>x.id!==id);_mtSave();renderMeetings();
+}
+
+/* ---------- 他画面との連携 ---------- */
+// 機種詳細設定・図鑑に表示する打ち合わせ履歴
+function _mtHistoryHtml(key){
+  if(!_mtLoaded)return '<div class="pt-muted">（議事録は「定例・TODO」を開くと読み込まれます）</div>';
+  const list=_mt.meetings.flatMap(m=>(m.rows||[]).filter(r=>r.key===key).map(r=>Object.assign({},r,{mdate:m.date}))).sort((a,b)=>String(b.mdate).localeCompare(String(a.mdate))).slice(0,12);
+  const todos=_mt.todos.filter(t=>t.key===key&&!t.done);
+  if(!list.length&&!todos.length)return '<div class="pt-muted">打ち合わせ履歴はまだありません</div>';
+  return `${todos.length?`<div style="font-size:12px;margin-bottom:6px;">未完了TODO: ${todos.map(t=>`<span class="st st-yellow" style="padding:0 6px;">${_e9(t.text)}${t.due?'（'+_e9(t.due)+'）':''}</span>`).join(' ')}</div>`:''}
+    <div class="pt-wrap" style="max-height:220px;"><table class="pt"><thead><tr><th class="pt-cur">会議日</th><th>区分</th><th>内容</th><th>予測(下/中/上)</th></tr></thead><tbody>
+    ${list.map(e=>`<tr><td class="c pt-cur">${_e9(e.mdate)}</td><td>${_e9(e.cat)}</td><td style="white-space:normal;">${_e9(e.text)}</td><td class="c">${e.fc?_e9([e.fc.low,e.fc.mid,e.fc.high].map(x=>x||'—').join(' / ')):''}</td></tr>`).join('')}</tbody></table></div>`;
+}
+// 今やること用: 期限超過・3日以内のTODO と 次回定例
+function _mtTodoStrip(){
+  if(!_mtLoaded){_mtLoad(()=>{if(currentPage==='dashboard')renderHome();});return [];}
+  const today=_todayStr(),soon=_addDays(today,3),out=[];
+  _mt.todos.filter(t=>!t.done&&_custMatch(t.customer||'fuji')&&t.due&&t.due<=soon).sort((a,b)=>String(a.due).localeCompare(String(b.due))).slice(0,6)
+    .forEach(t=>out.push({c:t.due<today?'st-red':'st-yellow',txt:`✅ ${t.key?_dispKey(t.key)+' ':''}${t.text.slice(0,30)}（${t.due<today?'期限超過':t.due}）`,act:`showPage('meetings');_mtTab='todo';renderMeetings()`}));
+  const nx=_mt.meetings.filter(m=>_custMatch(m.customer||'fuji')&&m.next&&m.next>=today).map(m=>m.next).sort()[0];
+  if(nx&&nx<=_addDays(today,7))out.push({c:'st-blue',txt:`📅 次回定例 ${nx}`,act:`showPage('meetings')`});
+  return out;
+}
+</script>

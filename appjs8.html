@@ -242,6 +242,8 @@ function openMachineEditor(key){
     </div>
     <div class="me-h">■ 構成表</div>
     <div class="pt-wrap" style="max-height:none;"><table class="pt"><thead><tr><th>構成表</th><th>状態</th><th class="pt-cur">依頼期限</th><th>依頼日</th><th>取得日</th><th>URL</th></tr></thead><tbody>${csRows}</tbody></table></div>
+    <div class="me-h">■ 打ち合わせ履歴（定例）</div>
+    <div id="me-mt">${typeof _mtHistoryHtml==='function'?_mtHistoryHtml(key):''}</div>
     <div class="me-h">■ 備考</div>
     <textarea id="me-notes" class="me-in" rows="3">${_e8(m?(state.notes[m.id]||''):(ov.notes||''))}</textarea>
     <div style="display:flex;gap:6px;margin-top:14px;flex-wrap:wrap;">
@@ -251,6 +253,7 @@ function openMachineEditor(key){
       <button class="btn btn-primary btn-sm" onclick="saveMachineEditor('${_e8(key)}')">💾 保存</button>
     </div>`,820);
   _onFrameChange(_frameOf(v),true);
+  if(typeof _mtLoad==='function'&&!_mtLoaded)_mtLoad(()=>{const el=document.getElementById('me-mt');if(el)el.innerHTML=_mtHistoryHtml(key);});
 }
 
 function saveMachineEditor(key){

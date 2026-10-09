@@ -63,6 +63,7 @@ function _homeTodo(alerts,csTodo){
   alerts.filter(a=>!a.urgent).forEach(a=>t.push({c:'st-yellow',txt:`⏰ ${a.machineId} ${a.label}（あと${a.diff}日）`,act:`openEditModal('${_e6(a.machineId)}')`}));
   const li=state.config.lastSunDenshiImportAt, ds=li?Math.floor((todayD-new Date(li))/86400000):null;
   if(!li||ds>35)t.push({c:'st-gray',txt:`📊 生産計画Excelの月次取込（${li?ds+'日経過':'未取込'}）`,act:`openImportModal()`});
+  if(typeof _mtTodoStrip==='function')_mtTodoStrip().forEach(x=>t.unshift(x));
   if(!t.length)return '';
   return `<div class="todo-strip"><strong style="font-size:12px;margin-right:4px;">今やること</strong>${t.map(x=>`<span class="st ${x.c}" style="cursor:pointer;" onclick="${x.act}">${_e6(x.txt)}</span>`).join('')}</div>`;
 }
@@ -127,7 +128,7 @@ function _homeData(){
     else{due=db.salesDate||ll.deliveryDate||'';st=due&&due<_todayStr()?{label:'販売済',cls:'st-green'}:{label:'計画',cls:'st-gray'};}
     const cs=typeof _csState==='function'?CS_KINDS.map(x=>({x,s:_csState(r.key,x.k)})):[];
     return Object.assign({},r,{cust:r.cust||'fuji',kind:_rowKind(r),title:db.title||'',person:(r.m&&r.m.person)||db.person||'',due,agg:db.aggDate||'',
-      qty:db.salesQty||ll.qty||(r.m?r.m.prodQty:'')||'',frame:db.frame||ll.frame||'',boards:_rowBoards(r),st,prog,cs,
+      qty:(db.forecast&&db.forecast.mid)?Number(db.forecast.mid).toLocaleString()+' *':(db.salesQty||ll.qty||(r.m?r.m.prodQty:'')||''),frame:db.frame||ll.frame||'',boards:_rowBoards(r),st,prog,cs,
       csAlert:cs.some(c=>c.s.label==='依頼期限超過'||c.s.label==='要依頼')});
   });
 }
@@ -221,7 +222,7 @@ function renderHome(){
         <button class="btn btn-sm" style="color:#16a34a;border-color:#16a34a;" onclick="_homeCsv()">📥 CSV</button>
         <button class="btn btn-sm" onclick="openImportModal()">📥 取り込み</button>
       </div>
-      <div class="pt-info">${showC?'すべての得意先':'<b>'+_e6(_custName(_curCust()))+'</b>'}：${list.length}機種（うち構成表の要依頼 <b style="color:#dc2626;">${list.filter(d=>d.csAlert).length}</b>）。黄色が販売時期（生産計画に無い登録機種は量産出荷日）。行クリック（または編集）で機種詳細設定を開き、タイトル・日程・基板などを入力できます。</div>
+      <div class="pt-info">${showC?'すべての得意先':'<b>'+_e6(_custName(_curCust()))+'</b>'}：${list.length}機種（うち構成表の要依頼 <b style="color:#dc2626;">${list.filter(d=>d.csAlert).length}</b>）。黄色が販売時期（生産計画に無い登録機種は量産出荷日）。台数の * は定例打ち合わせの予測台数（中）。行クリック（または編集）で機種詳細設定を開き、タイトル・日程・基板などを入力できます。</div>
       <div class="pt-wrap" id="home-pt"><table class="pt"><thead>
         <tr><th rowspan="2">機種</th>${showC?'<th rowspan="2">得意先</th>':''}<th rowspan="2">タイトル</th><th rowspan="2">担当</th>
           <th colspan="3">生産計画</th><th colspan="${BC.length+1}">枠・使用基板</th><th colspan="3">構成表</th>

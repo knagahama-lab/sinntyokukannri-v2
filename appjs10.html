@@ -1,0 +1,154 @@
+<script>
+/* ============================================================
+   機種 ⇔ 基板管理 ⇔ 製品図鑑 の連携
+   ・全機種（登録機種＋機種DB、全得意先）で使っている基板を集計し、
+     基板管理(state.partsStock)へ自動登録（M/D/DE/E/C に分類）
+   ・基板管理に「使用機種」を表示。品番変更は使用中の全機種の基板欄にも反映
+   ・機種詳細設定の基板欄は基板管理の品番から選べ、仕様・価格を表示
+   ・製品図鑑の機種図鑑／基板図鑑に全機種・全基板を自動で掲載（開いた時に登録）
+   基板の同一判定: 「FJ+」や「（三球）」等の注記を除いた品番（例 FJ+D2101A → D2101A）
+   ※ このファイルの文字列にスラッシュ2つやスラッシュ+アスタリスクを書かないこと
+============================================================ */
+function _e10(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function _bkey(raw){
+  return String(raw||'').replace(/^FJ\s*\+\s*/i,'').replace(/[（(][^）)]*[）)]/g,'').replace(/\s+/g,'').trim();
+}
+function _bkeyValid(k){return !!k&&!/^(不要|なし|－|-|—|ROMカセット)/.test(k)&&k.length>=4;}
+
+// 全機種の使用基板を集計 { 品番: {key,cat,raws:[表記],users:[{key,label,cust,slot,title}]} }
+function _boardIndex(){
+  const idx={},seen={};
+  const add=(raw,slot,key,cust)=>{
+    const k=_bkey(raw);if(!_bkeyValid(k))return;
+    const e=idx[k]=idx[k]||{key:k,cat:'',raws:[],users:[]};
+    if(!e.cat)e.cat=slot||_boardCat(k)||'';
+    if(!e.raws.includes(raw))e.raws.push(raw);
+    if(!e.users.some(u=>u.key===key&&u.slot===slot)){
+      const v=_mdbView(key)||{};
+      e.users.push({key,label:_dispKey(key),cust,slot,title:v.title||'',kind:v.kind||''});
+    }
+  };
+  MACHINES.forEach(m=>{const k=_machineKey(m);seen[k]=1;
+    Object.entries(_rowBoards({key:k,m,db:_mdbView(k)})).forEach(([slot,v])=>add(v,slot,k,_machineCust(m.id)));});
+  Object.keys(state.modelDB||{}).concat(Object.keys(state.modelOverrides||{})).forEach(k=>{
+    if(seen[k])return;seen[k]=1;
+    Object.entries(_rowBoards({key:k,m:null,db:_mdbView(k)})).forEach(([slot,v])=>add(v,slot,k,_keyCust(k)));});
+  return idx;
+}
+
+// 基板管理へ自動登録（不足分だけ作成・分類が空なら設定）
+let _boardSyncSaveT=null;
+function _syncBoardMaster(){
+  const idx=_boardIndex();window._boardIdx=idx;
+  let changed=0;
+  Object.values(idx).forEach(e=>{
+    const isNew=!state.partsStock[e.key];
+    const ps=_getPartsStock(e.key);
+    if(isNew)changed++;
+    if(!ps.category&&e.cat){ps.category=e.cat;changed++;}
+    if(!ps.machineType){
+      const kinds=[...new Set(e.users.map(u=>u.kind).filter(Boolean))];
+      if(kinds.length){ps.machineType=kinds.length>1?'パチンコ/スロット':kinds[0];changed++;}
+    }
+  });
+  if(changed){clearTimeout(_boardSyncSaveT);_boardSyncSaveT=setTimeout(()=>saveToGAS(),800);}
+  return idx;
+}
+
+// 基板管理の各基板に表示する「使用機種」
+function _boardUsersHtml(model){
+  const idx=window._boardIdx||_boardIndex();
+  const e=idx[_bkey(model)]||idx[model];
+  const users=e?e.users:[];
+  return `<div style="padding:0 14px 10px;font-size:12px;">
+    <span style="font-weight:700;color:var(--text-sub);">使用機種（${users.length}）</span>
+    ${users.length?users.slice().sort((a,b)=>a.label.localeCompare(b.label)).map(u=>`<a href="#" class="pt-tag" style="text-decoration:none;margin:2px 3px;display:inline-block;" title="${_e10((u.title||'')+'／'+_custName(u.cust)+'／'+u.slot)}"
+      onclick="event.preventDefault();openMachineEditor('${_e10(u.key)}')">${_e10(u.label)}${u.title?' '+_e10(u.title):''}</a>`).join(''):'<span class="pt-muted">機種での使用なし</span>'}
+    ${e&&e.raws.length>1?`<div class="pt-muted" style="margin-top:4px;">表記ゆれ: ${e.raws.map(_e10).join(' ／ ')}</div>`:''}
+    <div style="margin-top:6px;"><button class="btn btn-sm" onclick="renameBoardModel('${_e10(model)}')">✏️ 品番を変更（使用機種にも反映）</button></div>
+  </div>`;
+}
+
+// 品番変更: 基板管理のデータを移し、使用中の全機種の基板欄も書き換える
+function renameBoardModel(oldKey){
+  const nk=(prompt(`「${oldKey}」の新しい品番を入力してください。\n使用している機種の基板欄もすべて書き換えます。`,oldKey)||'').trim();
+  if(!nk||nk===oldKey)return;
+  const idx=_boardIndex();const e=idx[_bkey(oldKey)]||idx[oldKey];
+  // 基板管理・写真・添付・図鑑を移す（移動先に既にあれば空の項目だけ補う）
+  [['partsStock'],['boardPhotos'],['boardDriveFiles'],['catalogBoards']].forEach(([f])=>{
+    const o=state[f]||{};if(!o[oldKey])return;
+    if(!o[nk])o[nk]=o[oldKey];
+    else if(typeof o[nk]==='object'&&!Array.isArray(o[nk]))Object.keys(o[oldKey]).forEach(k=>{if(o[nk][k]==null||o[nk][k]===''||(Array.isArray(o[nk][k])&&!o[nk][k].length))o[nk][k]=o[oldKey][k];});
+    delete o[oldKey];
+  });
+  let n=0;
+  (e?e.users:[]).forEach(u=>{
+    const m=_machineForKey(u.key);
+    const cur=_rowBoards({key:u.key,m,db:_mdbView(u.key)})[u.slot]||'';
+    const nv=cur.indexOf(_bkey(oldKey))>=0?cur.replace(_bkey(oldKey),nk):nk;
+    const ov=state.modelOverrides[u.key]=state.modelOverrides[u.key]||{};
+    ov.boards=Object.assign({},ov.boards||{},{[u.slot]:nv});
+    if(m)(m.boards||[]).forEach(b=>{if(_bkey(b.model)===_bkey(oldKey))b.model=String(b.model).replace(_bkey(oldKey),nk);});
+    n++;
+  });
+  addLog(`🔧 基板の品番変更: ${oldKey} → ${nk}（使用機種 ${n}件に反映）`);
+  saveToGAS(`基板品番変更 ${oldKey}→${nk}`);
+  showToast(`✅ ${oldKey} → ${nk}（使用機種 ${n}件に反映）`,4000);
+  renderPage(currentPage);
+}
+
+// 機種詳細設定の基板欄: 基板管理の品番を候補に出し、仕様・価格を表示
+function _boardFieldHtml(slot,val){
+  const keys=Object.keys(state.partsStock||{}).filter(k=>(state.partsStock[k].category||_boardCat(k))===slot).sort();
+  const ps=state.partsStock[_bkey(val)];
+  const info=ps?[ps.spec,ps.price&&ps.price.new?'¥'+Number(ps.price.new).toLocaleString():''].filter(Boolean).join('／'):'';
+  return `<input id="me-b-${slot}" list="me-bl-${slot}" value="${_e10(val||'')}" class="me-in" oninput="_boardFieldInfo('${slot}',this.value)">
+    <datalist id="me-bl-${slot}">${keys.map(k=>`<option value="${_e10(k)}">`).join('')}</datalist>
+    <div id="me-bi-${slot}" class="pt-muted" style="font-weight:400;min-height:14px;">${ps?`<a href="#" class="q" onclick="event.preventDefault();openDetailModal('board','${_e10(_bkey(val))}')">${_e10(info||'基板情報を見る')}</a>`:(val?'基板管理に未登録（保存すると登録）':'')}</div>`;
+}
+function _boardFieldInfo(slot,val){
+  const el=document.getElementById('me-bi-'+slot);if(!el)return;
+  const ps=state.partsStock[_bkey(val)];
+  el.innerHTML=ps?_e10([ps.spec,ps.price&&ps.price.new?'¥'+Number(ps.price.new).toLocaleString():''].filter(Boolean).join('／')||'基板管理に登録済み'):(val?'基板管理に未登録（保存すると登録）':'');
+}
+
+/* ---------- 製品図鑑: 全機種・全基板を掲載（開いた時に図鑑データを作成） ---------- */
+const _CAT_LABEL={M:'主制御基板（M）',D:'液晶制御基板（D）',DE:'液晶IF基板（DE）',E:'演出基板（E）',C:'払出・サブ制御基板（C）'};
+function _catalogEntries(isModel){
+  if(isModel){
+    const out={};
+    const add=(key,m)=>{
+      const v=_mdbView(key)||{};const b=_rowBoards({key,m,db:v});const code=_dispKey(key);
+      out[code]={name:v.title||'',type:v.kind||'',brand:v.brand||'',date:v.salesDate||'',
+        boards:{m:b.M||'',d:b.D||'',de:b.DE||'',e:b.E||'',c:b.C||''},summary:'',updatedAt:v.updatedAt||'',_auto:true,_key:key};
+    };
+    const seen={};
+    MACHINES.forEach(m=>{const k=_machineKey(m);seen[k]=1;add(k,m);});
+    Object.keys(state.modelDB||{}).concat(Object.keys(state.modelOverrides||{})).forEach(k=>{if(!seen[k]){seen[k]=1;add(k,null);}});
+    Object.keys(state.catalogModels||{}).forEach(c=>{out[c]=Object.assign({},out[c]||{},state.catalogModels[c],{_auto:false});});
+    return out;
+  }
+  const idx=window._boardIdx||_boardIndex();const out={};
+  Object.values(idx).forEach(e=>{const ps=state.partsStock[e.key]||{};
+    out[e.key]={name:e.key,category:_CAT_LABEL[e.cat]||e.cat||'',specs:ps.spec||'',
+      relatedModels:e.users.map(u=>u.label).join(', '),updatedAt:'',_auto:true};});
+  Object.keys(state.catalogBoards||{}).forEach(c=>{
+    const auto=out[c]||{};out[c]=Object.assign({},auto,state.catalogBoards[c],{_auto:false});
+    if(auto.relatedModels)out[c].relatedModels=auto.relatedModels; // 使用機種は常に最新を表示
+  });
+  return out;
+}
+// 自動掲載の項目を開く時に図鑑データとして登録してから詳細を開く
+function openCatalogEntry(isModel,code){
+  const store=isModel?state.catalogModels:state.catalogBoards;
+  if(!store[code]){
+    const e=_catalogEntries(isModel)[code]||{};
+    if(isModel)store[code]={name:e.name||'',type:e.type||'',gameType:e.type||'',brand:e.brand||'',date:e.date||'',
+      boards:Object.assign({m:'',d:'',de:'',e:'',c:'',s:'',r:''},e.boards||{}),summary:'',features:'',studyNote:'',salesUnits:'',note:'',photoUrl:'',updatedAt:_todayStr()};
+    else store[code]={name:code,type:'',category:e.category||'',brand:'',version:'',status:'',specs:e.specs||'',mainParts:'',
+      studyPoint:'',relatedModels:e.relatedModels||'',note:'',photoUrl:'',updatedAt:_todayStr()};
+    saveToGAS();
+  }
+  openDetailModal(isModel?'catalogModel':'catalogBoard',code);
+}
+</script>

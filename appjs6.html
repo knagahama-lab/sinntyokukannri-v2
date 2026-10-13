@@ -31,6 +31,9 @@ function _machineStatus(m,alerts){
 }
 function _boardHasDocs(machineId,model){
   if(_getBoardDriveFiles(model).length)return true;
+  // 基板管理の品番（FJ+や注記を除いたもの）でも確認
+  const bk=typeof _bkey==='function'?_bkey(model):model;
+  if(bk!==model){const f2=state.boardDriveFiles&&state.boardDriveFiles[bk];if(f2&&f2.length)return true;const p2=state.partsStock[bk];if(p2&&((p2.bom&&p2.bom.length)||p2.spec))return true;}
   const d=state.boardDocs[machineId];
   if(d&&BOARD_TYPE_DEFS.some(bt=>d[bt.key]&&d[bt.key].model===model&&(d[bt.key].specUrl||d[bt.key].pcbUrl)))return true;
   const ps=state.partsStock[model];
@@ -184,7 +187,7 @@ function renderHome(){
   const ns=g=>base.filter(d=>kindPass(d)&&stPass(d,g)).length;
   const tree=list.slice(0,_homeLimit).map(d=>`<details class="tree-node" ${term?'open':''}>
       <summary><span class="tree-machine" onclick="event.preventDefault();${openRow(d)}">${d.m?'📁':'🗂'} ${_e6(_dispKey(d.key))}</span>${d.title?` <span class="muted" style="font-size:10px;font-weight:400;">${_e6(d.title)}</span>`:''}</summary>
-      ${BC.filter(c=>d.boards[c]).map(c=>`<div class="tree-board" onclick="openDetailModal('board','${_e6(d.boards[c])}')"><span>🔲 ${c} <span class="tree-model">${_e6(d.boards[c])}</span></span>
+      ${BC.filter(c=>d.boards[c]).map(c=>`<div class="tree-board" onclick="openDetailModal('board','${_e6(typeof _bkey==='function'?_bkey(d.boards[c]):d.boards[c])}')"><span>🔲 ${c} <span class="tree-model">${_e6(d.boards[c])}</span></span>
         <span class="dot ${_boardHasDocs(d.key,d.boards[c])?'dot-g':'dot-r'}"></span></div>`).join('')||'<div class="tree-board muted">基板未登録</div>'}
     </details>`).join('')||'<div class="muted" style="padding:10px;">該当なし</div>';
 

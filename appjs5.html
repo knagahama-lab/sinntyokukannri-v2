@@ -55,6 +55,7 @@ function _boardMasterRow(model,term){
           <div style="text-align:center;"><div style="font-size:10px;color:var(--text-sub);">エコ</div><div style="font-size:14px;font-weight:700;">${ps.stock.eco}</div></div>
         </div>
       </div>
+      ${typeof _boardUsersHtml==='function'?_boardUsersHtml(model):''}
       <div style="padding:0 14px 14px;">
         <details style="margin-top:2px;">
           <summary style="cursor:pointer;font-size:11px;font-weight:600;color:var(--text-sub);">🔩 使用部品（BOM） ${bomCount}点 ／ 合計 ¥${bomTotal.toLocaleString('ja-JP')}</summary>
@@ -73,6 +74,8 @@ function _boardMasterMatches(model,term){
 }
 
 function renderBoards(){
+  // 全機種で使っている基板を基板管理へ自動登録（機種⇔基板の連携）
+  if(typeof _syncBoardMaster==='function')_syncBoardMaster();
   const searchEl=document.getElementById('boards-search');
   const term=(searchEl?searchEl.value:'').trim().toLowerCase();
   const cursorPos=searchEl?searchEl.selectionStart:null;
@@ -98,7 +101,7 @@ function renderBoards(){
   ):'';
 
   document.getElementById('page-boards').innerHTML=`
-    <div class="page-heading"><div><h2>🔧 基板管理</h2><p>主制御基板(M)・液晶制御基板(D)・液晶IF基板(DE)・演出基板(E)・サブ制御基板(C) — パチンコ/スロット区分・仕様・価格・使用部品を品番単位で管理</p></div></div>
+    <div class="page-heading"><div><h2>🔧 基板管理</h2><p>主制御基板(M)・液晶制御基板(D)・液晶IF基板(DE)・演出基板(E)・払出制御基板(C) — 全機種で使っている基板を自動登録・パチンコ/スロット区分・仕様・価格・使用部品を品番単位で管理</p></div></div>
     <div class="filter-bar">
       <input id="boards-search" type="text" placeholder="🔍 品番・仕様・部品名で検索" value="${_esc(term)}" oninput="renderBoards()"
         style="flex:1;min-width:240px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
@@ -653,7 +656,11 @@ function renderCatalog(){
   const hadFocus=document.activeElement===searchEl;
 
   const isModel=_catalogTab==='model';
-  const entries=isModel?state.catalogModels:state.catalogBoards;
+  // 全機種・全基板を自動で掲載（図鑑データは開いた時に作成）
+  if(!isModel&&typeof _syncBoardMaster==='function')_syncBoardMaster();
+  const entries=typeof _catalogEntries==='function'?_catalogEntries(isModel):(isModel?state.catalogModels:state.catalogBoards);
+  const nModels=typeof _catalogEntries==='function'?Object.keys(_catalogEntries(true)).length:Object.keys(state.catalogModels).length;
+  const nBoards=typeof _catalogEntries==='function'?Object.keys(_catalogEntries(false)).length:Object.keys(state.catalogBoards).length;
   const codes=Object.keys(entries).filter(code=>{
     if(!term)return true;
     const e=entries[code];
@@ -662,7 +669,7 @@ function renderCatalog(){
 
   const rowsHtml=codes.map(code=>{
     const e=entries[code];
-    return`<tr style="cursor:pointer;" onclick="openDetailModal('${isModel?'catalogModel':'catalogBoard'}','${code}')">
+    return`<tr style="cursor:pointer;" onclick="${typeof openCatalogEntry==='function'?`openCatalogEntry(${isModel},'${code}')`:`openDetailModal('${isModel?'catalogModel':'catalogBoard'}','${code}')`}">
       <td>${e.photoUrl?`<img src="${_esc(e.photoUrl)}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;">`:`<span style="color:var(--text-muted);font-size:11px;">—</span>`}</td>
       <td><strong>${_esc(code)}</strong></td>
       <td>${_esc(isModel?e.name:e.name)||'—'}</td>
@@ -675,8 +682,8 @@ function renderCatalog(){
   document.getElementById('page-catalog').innerHTML=`
     <div class="page-heading"><div><h2>📖 製品図鑑</h2><p>機種・基板の特徴/仕様/学習メモをまとめるナレッジベース。実務の進捗・在庫データとは別に、社内教育や引き継ぎ用の情報を蓄積します。</p></div></div>
     <div style="display:flex;gap:8px;margin-bottom:14px;">
-      <button class="btn btn-sm ${isModel?'btn-primary':''}" onclick="showCatalogTab('model')">🏭 機種図鑑（${Object.keys(state.catalogModels).length}）</button>
-      <button class="btn btn-sm ${!isModel?'btn-primary':''}" onclick="showCatalogTab('board')">🔌 基板図鑑（${Object.keys(state.catalogBoards).length}）</button>
+      <button class="btn btn-sm ${isModel?'btn-primary':''}" onclick="showCatalogTab('model')">🏭 機種図鑑（${nModels}）</button>
+      <button class="btn btn-sm ${!isModel?'btn-primary':''}" onclick="showCatalogTab('board')">🔌 基板図鑑（${nBoards}）</button>
     </div>
     <div class="filter-bar">
       <input id="catalog-search" type="text" placeholder="🔍 コード・名称・概要で検索" value="${_esc(term)}" oninput="renderCatalog()"

@@ -238,7 +238,7 @@ function openMachineEditor(key){
       <div style="font-size:11px;padding-bottom:6px;"><span id="me-frame-hint"></span>　<a href="#" class="q" onclick="event.preventDefault();openFrameMapEditor()">⚙ 対応表を編集</a></div>
     </div>
     <div class="me-grid" style="grid-template-columns:repeat(5,minmax(0,1fr));margin-top:10px;">
-      ${_ED_BC.map(c=>fld(c==='C'?'C（払出制御）':c,inp('b-'+c,boards[c]))).join('')}
+      ${_ED_BC.map(c=>fld(c==='C'?'C（払出制御）':c,typeof _boardFieldHtml==='function'?_boardFieldHtml(c,boards[c]):inp('b-'+c,boards[c]))).join('')}
     </div>
     <div class="me-h">■ 構成表</div>
     <div class="pt-wrap" style="max-height:none;"><table class="pt"><thead><tr><th>構成表</th><th>状態</th><th class="pt-cur">依頼期限</th><th>依頼日</th><th>取得日</th><th>URL</th></tr></thead><tbody>${csRows}</tbody></table></div>
@@ -308,6 +308,7 @@ function saveMachineEditor(key){
       if(state.configSheets[key]){state.configSheets[nk]=state.configSheets[key];delete state.configSheets[key];}
     }
   }
+  if(typeof _syncBoardMaster==='function')_syncBoardMaster(); // 新しい基板は基板管理へ登録
   addLog(`✏️ ${_dispKey(key)} の詳細を更新`);
   saveToGAS(`${_dispKey(key)} 詳細更新`);
   const ovl=document.getElementById('machine-editor');if(ovl)ovl.remove();

@@ -163,7 +163,7 @@ function renderHome(){
   const openRow=d=>`openMachineEditor('${_e6(d.key)}')`;
   const fmt=v=>v?_e6(String(v).replace(/-/g,'/')):'<span class="same">—</span>';
   const BC=['M','D','DE','E','C'];
-  const NC=13+BC.length+(showC?1:0);
+  const NC=14+BC.length+(showC?1:0);
   const secOf=d=>(showC?_custName(d.cust)+' ／ ':'')+d.kind;
 
   let body='',last='';
@@ -179,6 +179,8 @@ function renderHome(){
       <td class="c">${_e6(d.frame)||'<span class="same">—</span>'}</td>
       ${BC.map(c=>`<td class="spec" style="max-width:110px;" title="${_e6(d.boards[c]||'')}">${_e6(d.boards[c]||'')||'<span class="same">—</span>'}</td>`).join('')}
       ${d.cs.map(c=>`<td class="c" onclick="event.stopPropagation()">${_csSelect(d.key,c.x.k,c.s)}</td>`).join('')}
+      <td onclick="event.stopPropagation()" style="min-width:150px;">${(()=>{if(typeof _fpSummary!=='function')return '';const b=_fpSummary(d.key).ball;if(!b.step)return '<span class="st st-green" style="padding:0 6px;">✅ フロー完了</span>';
+        return `<a href="#" class="q" style="font-size:11px;line-height:1.3;display:block;" title="${_e6(b.step.label)}" onclick="event.preventDefault();openStepDetail('${_e6(d.key)}','${b.step.id}')">⚽ <b>${_e6(_fpLaneName(b.step))}</b><br>${_e6(b.step.label.slice(0,18))}${b.manual?' <span class="st st-yellow" style="padding:0 4px;font-size:9px;">手動</span>':''}</a>`;})()}</td>
       <td class="c"><span class="st ${d.st.cls}" style="padding:0 6px;">${_e6(d.st.label)}</span></td>
       <td class="num" style="font-weight:500;">${d.prog||'<span class="same">—</span>'}</td>
       <td class="c" onclick="event.stopPropagation()">${true?`<button class="btn btn-sm" style="padding:1px 8px;" onclick="openMachineEditor('${_e6(d.key)}')">編集</button>`:''}</td></tr>`;
@@ -223,13 +225,14 @@ function renderHome(){
         <label style="font-size:12px;display:flex;align-items:center;gap:4px;"><input type="checkbox" ${_homeRegOnly?'checked':''} onchange="_homeRegOnly=this.checked;renderHome()"> 登録機種のみ</label>
         <button class="btn btn-sm" onclick="_ptPrint('機種一覧','home-pt')">🖨 印刷</button>
         <button class="btn btn-sm" style="color:#16a34a;border-color:#16a34a;" onclick="_homeCsv()">📥 CSV</button>
+        <button class="btn btn-sm" style="border-color:#f59e0b;" onclick="_fpTab='ball';showPage('flow')">⚽ ボール位置ボード</button>
         <button class="btn btn-sm" onclick="openImportModal()">📥 取り込み</button>
       </div>
       <div class="pt-info">${showC?'すべての得意先':'<b>'+_e6(_custName(_curCust()))+'</b>'}：${list.length}機種（うち構成表の要依頼 <b style="color:#dc2626;">${list.filter(d=>d.csAlert).length}</b>）。黄色が販売時期（生産計画に無い登録機種は量産出荷日）。台数の * は定例打ち合わせの予測台数（中）。行クリック（または編集）で機種詳細設定を開き、タイトル・日程・基板などを入力できます。</div>
       <div class="pt-wrap" id="home-pt"><table class="pt"><thead>
         <tr><th rowspan="2">機種</th>${showC?'<th rowspan="2">得意先</th>':''}<th rowspan="2">タイトル</th><th rowspan="2">担当</th>
           <th colspan="3">生産計画</th><th colspan="${BC.length+1}">枠・使用基板</th><th colspan="3">構成表</th>
-          <th rowspan="2">状態</th><th rowspan="2">進行</th><th rowspan="2"></th></tr>
+          <th rowspan="2" title="業務フロー（機種開発～量産準備）で今ボールがある部署と工程">⚽ ボール</th><th rowspan="2">状態</th><th rowspan="2">進行</th><th rowspan="2"></th></tr>
         <tr><th class="pt-cur">販売時期</th><th>部品集約</th><th>台数</th><th>枠</th>${BC.map(c=>`<th>${c}</th>`).join('')}<th>量産準備用</th><th>見本機用</th><th>量産用</th></tr>
       </thead><tbody>${body||`<tr><td colspan="${NC}" class="c same" style="padding:20px;">該当する機種がありません</td></tr>`}</tbody></table></div>
       ${list.length>_homeLimit?`<div style="text-align:center;margin:8px;"><button class="btn btn-sm" onclick="_homeLimit+=300;renderHome()">さらに表示（残り ${list.length-_homeLimit}機種）</button></div>`:''}

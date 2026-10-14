@@ -178,6 +178,16 @@ function saveData(stateJson) {
       inc.config.sheetChangedIds = cc.sheetChangedIds;
       stateJson = JSON.stringify(inc);
     }
+    // Obsidian取込などサーバー側で反映した機種データ(modelOverrides)を、それより前に開いた画面の保存で戻さない
+    inc = JSON.parse(stateJson); ic = inc.config || {};
+    if (cc.serverChangedAt && cc.serverChangedAt !== ic.serverChangedAt && Array.isArray(cc.serverChangedKeys) && cur && cur.modelOverrides) {
+      inc.modelOverrides = inc.modelOverrides || {};
+      cc.serverChangedKeys.forEach(function(k) {
+        if (cur.modelOverrides[k]) inc.modelOverrides[k] = Object.assign({}, inc.modelOverrides[k] || {}, cur.modelOverrides[k]);
+      });
+      inc.config = inc.config || {}; inc.config.serverChangedAt = cc.serverChangedAt; inc.config.serverChangedKeys = cc.serverChangedKeys;
+      stateJson = JSON.stringify(inc);
+    }
   } catch (e) { Logger.log('saveData merge: ' + e.message); }
   PropertiesService.getScriptProperties().setProperty('sinntyoku_state', stateJson);
 }
@@ -879,7 +889,13 @@ function loadStore(name) {
 }
 function saveStore(name, json) {
   var lock = LockService.getScriptLock(); lock.waitLock(20000);
-  try { JSON.parse(json); _storeFile(name).setContent(json); return JSON.stringify({ success: true }); }
+  try {
+    JSON.parse(json);
+    var file = _storeFile(name);
+    if (name === '議事録') json = _mergeMeetingStore(file.getBlob().getDataAsString('UTF-8'), json);
+    file.setContent(json);
+    return JSON.stringify({ success: true });
+  }
   catch (e) { return JSON.stringify({ success: false, error: e.message }); }
   finally { lock.releaseLock(); }
 }
@@ -1002,6 +1018,305 @@ function pushMeetingToCrm(json) {
   } catch (e) {
     return JSON.stringify({ success: false, error: e.message });
   } finally { lock.releaseLock(); }
+}
+
+/* ============================================================
+   Obsidian の議事録メモを自動で取り込む（30分ごと）
+   PC側のタスク「ObsidianToProgress同期」が Vault の対象メモ
+   （定例・打合せ・議事録・藤商事を含む、2026/10/09以降）を
+   Googleドライブ「ObsidianToProgress」フォルダへコピーし、
+   ここで機種ごとに自動振り分けして議事録・TODO・機種データ・CRMへ反映する。
+   【一度だけ実行】 setupObsidianImportTrigger（画面のボタンからも可）
+============================================================ */
+var OBS_FOLDER = 'ObsidianToProgress';
+
+// <<MT_PARSER_BEGIN>>
+const MT_CATS=['販売予測','販売時期','適合','構成表','在庫・終息','注文','見本機日程','エコ・リユース','課題・質問','部品・メーカー','メモ'];
+/* ---------- メモの自動振り分け ---------- */
+const _MT_CODE=/(?:^|[^A-Za-z0-9])([A-Z]{1,2}\d{2,3}[A-Z]?(?:甘)?)(?![0-9])/g;
+function _mtCodes(t){const out=[];let m;_MT_CODE.lastIndex=0;while((m=_MT_CODE.exec(t)))if(!out.includes(m[1]))out.push(m[1]);return out;}
+function _mtClassify(t){
+  if(/[?？]/.test(t))return '課題・質問';
+  if(/適合/.test(t))return '適合';
+  if(/構成表/.test(t))return '構成表';
+  if(/見本機|マスタ\s*ロム|マスターロム|営業所着/.test(t))return '見本機日程';
+  if(/販売/.test(t)&&/\d{1,2}月/.test(t))return '販売時期';
+  if(/[\d,]{3,}\s*台/.test(t))return '販売予測';
+  if(/在庫|仕掛|残数|終息|PCB/.test(t))return '在庫・終息';
+  if(/注文/.test(t))return '注文';
+  if(/リユース|りゆーす|エコ|新品/.test(t))return 'エコ・リユース';
+  return 'メモ';
+}
+function _mtForecast(t){
+  const n=s=>Number(String(s).replace(/,/g,''));
+  const hi=t.match(/上\s*([\d,]{3,})/),lo=t.match(/下\s*([\d,]{3,})/),mid=t.match(/中\s*([\d,]{3,})/),any=t.match(/([\d,]{3,})\s*台/);
+  if(!hi&&!lo&&!mid&&!any)return null;
+  return {low:lo?n(lo[1]):'',mid:mid?n(mid[1]):(any?n(any[1]):''),high:hi?n(hi[1]):''};
+}
+// 「1月11日」「11月9日」「1/11」「12月」→ 日付（会議日より3か月以上前の月は翌年とみなす）
+function _mtDate(t,base){
+  const b=base?new Date(base):new Date();
+  let mo,d;
+  let m=t.match(/(\d{1,2})月(\d{1,2})日/)||t.match(/(?:^|[^\d])(\d{1,2})\/(\d{1,2})(?:[^\d]|$)/);
+  if(m){mo=+m[1];d=+m[2];}else{m=t.match(/(\d{1,2})月/);if(!m)return '';mo=+m[1];d=1;}
+  if(mo<1||mo>12||d<1||d>31)return '';
+  let y=b.getFullYear();if(mo<b.getMonth()+1-3)y++;
+  return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+function _mtIsTodo(t,cat){
+  if(cat==='課題・質問'||cat==='構成表')return true;
+  return /→[^。]*?(貰う|もらう|依頼する|を依頼|確認する|を確認|把握する|調べる|情報収集|聞く|回答する|連絡する)|必要がある|把握する|情報収集|検討する/.test(t);
+}
+function _mtTopicCat(t){return /(東芝|ケル|板橋|三球|キョウデン|オムロン|ニデック|カーライル|LED|ドライバ|キー|部品|メーカー|ピン|コネクタ)/.test(t)?'部品・メーカー':'メモ';}
+
+function _mtParse(raw,base){
+  const rows=[],attendees=[];let ctx=null,next='',prevBlank=true;
+  const mk=(code,text,extra)=>{
+    const cat=(extra&&extra.cat)||_mtClassify(text);
+    const r={id:'r'+Math.random().toString(36).slice(2,9),kind:'machine',code,name:'',cat,text,fc:_mtForecast(text),date:'',todo:_mtIsTodo(text,cat),due:'',apply:false};
+    if(cat==='販売時期'||cat==='見本機日程'||(extra&&extra.month))r.date=_mtDate(text,base)||(extra&&extra.monthDate)||'';
+    if(cat==='販売予測'&&!r.fc)r.fc=_mtForecast(text);
+    // 「本体率」「うち本体」は予測台数として反映しない
+    if(/本体/.test(text))r.fc=null;
+    r.apply=!!((cat==='販売時期'&&r.date)||(r.fc&&r.fc.mid));
+    return r;
+  };
+  const topic=(name,text)=>{const cat=/[?？]/.test(text)?'課題・質問':_mtTopicCat(name+text);
+    return {id:'r'+Math.random().toString(36).slice(2,9),kind:'topic',code:'',name,cat,text,fc:null,date:'',todo:_mtIsTodo(text,cat),due:'',apply:false};};
+  String(raw||'').split(/\r?\n/).forEach(line=>{
+    const t=line.replace(/[\s　]+$/,'').trim();
+    if(!t){prevBlank=true;return;}
+    const indented=/^[\s　]/.test(line);
+    // 冒頭の「藤商事：丸山様、長谷川様」「サン電子：…」は参加者
+    const at=!ctx&&!rows.length&&t.match(/^([^：:]{1,15})[：:]\s*(.+)$/);
+    if(at&&/様|、|,|，/.test(at[2])&&!/^[A-Z]{1,2}\d{2,3}/.test(t)){attendees.push(at[1].trim()+'：'+at[2].trim());prevBlank=false;return;}
+    const nx=t.match(/^次回\s*(.+)/);
+    if(nx){next=_mtDate(nx[1],base);rows.push(topic('次回打ち合わせ',t));prevBlank=false;return;}
+    const codes=_mtCodes(t);
+    const startsCode=/^[A-Z]{1,2}\d{2,3}/.test(t);
+    const monthHead=!indented&&t.match(/^(\d{1,2})月(?!\d{0,2}日)/);
+    if(monthHead){
+      const md=_mtDate(monthHead[1]+'月',base);
+      ctx={type:'month',month:+monthHead[1],monthDate:md,codes,last:codes};
+      codes.forEach(c=>rows.push(mk(c,t,{cat:'販売時期',month:true,monthDate:md})));
+      prevBlank=false;return;
+    }
+    if(!indented&&startsCode){
+      ctx={type:'machine',codes,last:codes};
+      const rest=t.replace(/[A-Z]{1,2}\d{2,3}[A-Z]?(?:甘)?/g,'').replace(/^[\s　,、（(]+|[)）]+$/g,'').trim();
+      if(rest)codes.forEach(c=>rows.push(mk(c,t)));
+      prevBlank=false;return;
+    }
+    // 見出し直後の短い行（インデント無し）は続きとみなす
+    if(!indented&&ctx&&ctx.type==='machine'&&!prevBlank&&t.length<=12&&!codes.length&&/(台|エコ|リユース|りゆーす|新品|あり|なし|済|予定)/.test(t)){ctx.codes.forEach(c=>rows.push(mk(c,t)));return;}
+    if(!indented){ctx={type:'topic',name:t.slice(0,40)};rows.push(topic(ctx.name,t));prevBlank=false;return;}
+    // インデント行
+    if(ctx&&ctx.type==='month'){
+      if(codes.length){ctx.last=codes;codes.forEach(c=>{const r=mk(c,`${ctx.month}月: `+t,{month:true,monthDate:ctx.monthDate});if(r.cat==='メモ'){r.cat='販売時期';r.apply=!!r.date;}rows.push(r);});}
+      else if(prevBlank){ctx={type:'topic',name:t.replace(/^[※\s　]+/,'').slice(0,40)};rows.push(topic(ctx.name,t));}
+      else (ctx.last.length?ctx.last:['']).forEach(c=>rows.push(c?mk(c,t):topic('その他',t)));
+      prevBlank=false;return;
+    }
+    if(ctx&&ctx.type==='machine'){(codes.length?codes:ctx.codes).forEach(c=>rows.push(mk(c,t)));prevBlank=false;return;}
+    if(ctx&&ctx.type==='topic'){rows.push(topic(ctx.name,t));prevBlank=false;return;}
+    rows.push(topic('その他',t));prevBlank=false;
+  });
+  return {rows,next,attendees};
+}
+// <<MT_PARSER_END>>
+
+function _obsNormId(raw) {
+  var s = String(raw || '').replace(/^[eLPp]:/, '').trim();
+  s = s.replace(/ｻﾌﾞ$/, 'B').replace(/サブ$/, 'B');
+  s = s.replace(/再々再々$/, '').replace(/再×\d+$/, '').replace(/再々$/, '').replace(/再$/, '');
+  return s.replace(/\s+/g, '');
+}
+function _obsKey(code, cid) { var k = _obsNormId(code); if (!k) return ''; return cid === 'fuji' ? k : cid + ':' + k; }
+function _obsFolder() {
+  var it = DriveApp.getRootFolder().getFoldersByName(OBS_FOLDER);
+  if (it.hasNext()) return it.next();
+  var all = DriveApp.getFoldersByName(OBS_FOLDER);
+  return all.hasNext() ? all.next() : null;
+}
+function _obsAddDays(ds, n) { var d = new Date(ds); if (isNaN(d)) return ''; d.setDate(d.getDate() + n); return Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd'); }
+
+/** トリガーから呼ばれる */
+function importObsidianNotesTrigger() { importObsidianNotes(false); }
+
+/** ドライブのフォルダから新しい・更新されたメモを取り込む。force=true で全件取り込み直し */
+function importObsidianNotes(force) {
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    var folder = _obsFolder();
+    if (!folder) return JSON.stringify({ success: false, error: 'Googleドライブに「' + OBS_FOLDER + '」フォルダがありません（PC側の同期が未実行）' });
+    var props = PropertiesService.getScriptProperties();
+    var map = {}; try { map = JSON.parse(props.getProperty('obsImported') || '{}'); } catch (e) {}
+    var state = {}; try { state = JSON.parse(loadData() || '{}'); } catch (e) {}
+    state.config = state.config || {}; state.modelOverrides = state.modelOverrides || {}; state.configSheets = state.configSheets || {};
+    var cfg = state.config;
+    var custs = (cfg.customers && cfg.customers.length) ? cfg.customers : [{ id: 'fuji', name: '藤商事', kw: ['藤商事'] }, { id: 'konami', name: 'コナミアミューズメント', kw: ['コナミ'] }, { id: 'excite', name: 'エキサイト', kw: ['エキサイト'] }];
+    var series = (cfg.meetingSeries && cfg.meetingSeries.length) ? cfg.meetingSeries : [{ id: 'shizai', name: '資材課 定例打ち合わせ', kind: 'customer', customer: 'fuji', interval: 14, attendees: '藤商事 資材課' }];
+    var mt = {}; try { mt = JSON.parse(loadStore('議事録') || '{}'); if (mt.__error) mt = {}; } catch (e) {}
+    mt.meetings = mt.meetings || []; mt.todos = mt.todos || [];
+    var mdb = {}; try { mdb = JSON.parse(loadModelDB() || '{}'); if (mdb.__error) mdb = {}; } catch (e) {}
+    var now = new Date().toISOString();
+    var done = [], ovKeys = [], crmQueue = [];
+
+    var files = folder.getFiles();
+    while (files.hasNext()) {
+      var f = files.next();
+      var fname = f.getName();
+      if (!/\.md$/i.test(fname)) continue;
+      var fid = f.getId(), upd = f.getLastUpdated().getTime();
+      if (force !== true && map[fid] && map[fid].upd >= upd) continue;
+      var text = f.getBlob().getDataAsString('UTF-8').replace(/^﻿/, '');
+      // frontmatter（あれば日付・参加者・取引先を使う）
+      var fm = {};
+      var fmm = text.match(/^---\r?\n([\s\S]*?)\r?\n---\s*\r?\n/);
+      if (fmm) {
+        fmm[1].split(/\r?\n/).forEach(function(l) { var kv = l.match(/^(\w+)\s*:\s*(.*)$/); if (kv) fm[kv[1]] = kv[2].replace(/^["'\[]|["'\]]$/g, '').trim(); });
+        text = text.slice(fmm[0].length);
+      }
+      var base = fname.replace(/\.md$/i, '');
+      var short = base.split('__').pop();
+      var dm = short.match(/(20\d{2})(\d{2})(\d{2})/);
+      var date = (fm.date && /^\d{4}-\d{2}-\d{2}/.test(fm.date)) ? fm.date.slice(0, 10)
+        : dm ? dm[1] + '-' + dm[2] + '-' + dm[3] : Utilities.formatDate(new Date(upd), 'Asia/Tokyo', 'yyyy-MM-dd');
+      var kind = /社内/.test(base) || /社内/.test(fm.type || '') ? 'internal' : 'customer';
+      var head = short + ' ' + (fm.partner || '') + ' ' + text.slice(0, 300);
+      var cid = 'fuji';
+      for (var ci = 0; ci < custs.length; ci++) {
+        var c = custs[ci], kws = [c.name].concat(c.kw || []).filter(String);
+        if (kws.some(function(k) { return head.indexOf(k) >= 0; })) { cid = c.id; break; }
+      }
+      var ser = null;
+      if (/丸山様定例|丸山様　定例|丸山様 定例|資材課/.test(short)) ser = series.filter(function(x) { return x.id === 'shizai'; })[0] || null;
+      if (!ser) ser = series.filter(function(x) { return x.name && short.indexOf(x.name) >= 0; })[0] || null;
+      if (ser && ser.customer) cid = ser.customer;
+      var title = ser ? ser.name : (short.replace(/^20\d{6}[_\s　]*/, '') || short);
+
+      var p = _mtParse(text, date);
+      var next = p.next || (ser && ser.interval ? _obsAddDays(date, ser.interval) : '');
+      var rows = p.rows.map(function(r) { r.key = r.kind === 'machine' && r.code ? _obsKey(r.code, cid) : ''; return r; });
+      var existing = null;
+      for (var mi = 0; mi < mt.meetings.length; mi++) if (mt.meetings[mi].src && mt.meetings[mi].src.fileId === fid) { existing = mt.meetings[mi]; break; }
+      var meeting = {
+        id: existing ? existing.id : 'mt' + upd + Math.random().toString(36).slice(2, 6),
+        date: date, customer: cid, kind: kind, seriesId: ser ? ser.id : (kind === 'internal' ? '__internal' : '__customer'),
+        title: title, attendees: (p.attendees || []).join(' ／ ') || fm.attendees || '', next: next, raw: text, rows: rows,
+        auto: true, reviewed: false, src: { fileId: fid, name: short, url: f.getUrl(), updated: new Date(upd).toISOString() },
+        crm: existing ? existing.crm : undefined, updatedAt: now
+      };
+      if (existing) mt.meetings[mt.meetings.indexOf(existing)] = meeting; else mt.meetings.unshift(meeting);
+
+      // TODO（同じ内容の未完了TODOがあれば追加しない）
+      var addTodo = function(text, key, topic, due) {
+        if (mt.todos.some(function(t) { return t.text === text && (t.key || '') === (key || '') && (t.meetingId === meeting.id || !t.done); })) return;
+        mt.todos.push({ id: 'td' + Date.now() + Math.random().toString(36).slice(2, 6), text: text, key: key || '', topic: topic || '', customer: cid,
+          due: due || next || '', owner: '', done: false, created: date, meetingId: meeting.id, updatedAt: now });
+      };
+      rows.forEach(function(r) {
+        if (r.todo) addTodo(r.text, r.key, r.kind === 'topic' ? r.name : '', r.due);
+        if (r.kind === 'machine' && r.key && r.cat === '適合' && /適合済/.test(r.text)) {
+          var cs = ((state.configSheets[r.key] || {}).mass) || {};
+          if (!cs.req && !cs.got) addTodo('量産構成表を依頼（適合済み）', r.key, '', r.due);
+        }
+        if (r.kind === 'machine' && r.key && r.apply) {
+          var ov = state.modelOverrides[r.key] = state.modelOverrides[r.key] || {};
+          if (r.cat === '販売時期' && r.date) ov.salesDate = r.date;
+          if (r.fc && (r.fc.mid || r.fc.low || r.fc.high)) ov.forecast = { low: r.fc.low || '', mid: r.fc.mid || '', high: r.fc.high || '', at: date };
+          if (r.cat === '適合') ov.compliance = r.text.replace(/^.*?適合/, '適合').slice(0, 40);
+          if (ovKeys.indexOf(r.key) < 0) ovKeys.push(r.key);
+        }
+      });
+      if (!meeting.crm && cfg.crmAutoPush !== false) crmQueue.push(meeting);
+      map[fid] = { upd: upd, meetingId: meeting.id, name: short, at: now };
+      done.push(short + '（' + rows.length + '行）');
+    }
+
+    // CRMへ記録（初回のみ）
+    crmQueue.forEach(function(m) {
+      try {
+        var groups = [], by = {};
+        var lab = function(key, code, name) { var t = key && mdb[key] && mdb[key].title; return code ? code + (t ? ' ' + t : '') : (name || 'その他'); };
+        m.rows.forEach(function(r) {
+          var l = lab(r.key, r.kind === 'machine' ? r.code : '', r.name);
+          var g = by[l]; if (!g) { g = by[l] = { label: l, lines: [], todos: [] }; groups.push(g); }
+          g.lines.push('[' + r.cat + '] ' + r.text + (r.fc && (r.fc.mid || r.fc.low || r.fc.high) ? '（予測 下' + (r.fc.low || '—') + '/中' + (r.fc.mid || '—') + '/上' + (r.fc.high || '—') + '）' : ''));
+        });
+        mt.todos.filter(function(t) { return t.meetingId === m.id; }).forEach(function(t) {
+          var l = t.key ? lab(t.key, _obsNormId(String(t.key).split(':').pop()), '') : (t.topic || 'その他');
+          var g = by[l]; if (!g) { g = by[l] = { label: l, lines: [], todos: [] }; groups.push(g); }
+          g.todos.push({ text: t.text, due: t.due || '' });
+        });
+        var cu = custs.filter(function(c) { return c.id === m.customer; })[0] || { name: '藤商事', kw: [] };
+        var r = JSON.parse(pushMeetingToCrm(JSON.stringify({ date: m.date, title: m.title, kind: m.kind, customerName: cu.name, customerKw: cu.kw || [],
+          attendees: m.attendees, next: m.next, raw: m.raw, groups: groups })));
+        if (r.success) { m.crm = { meetingId: r.meetingId, at: Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd'), activities: r.activities }; delete m.crmError; }
+        else m.crmError = r.error;
+      } catch (e) { m.crmError = e.message; }
+    });
+
+    if (done.length) {
+      _storeFile('議事録').setContent(JSON.stringify(mt));
+      if (ovKeys.length) {
+        // 画面を開いたままの人の保存で、ここで反映した機種データが古い値に戻らないよう記録（saveData で引き継ぐ）
+        cfg.serverChangedAt = now;
+        cfg.serverChangedKeys = ovKeys.concat((cfg.serverChangedKeys || []).filter(function(k) { return ovKeys.indexOf(k) < 0; })).slice(0, 300);
+        props.setProperty('sinntyoku_state', JSON.stringify(state));
+      }
+    }
+    cfg.lastObsidianImportAt = now;
+    props.setProperty('obsImported', JSON.stringify(map));
+    props.setProperty('obsLastRun', JSON.stringify({ at: now, imported: done }));
+    Logger.log('Obsidian取込: ' + (done.length ? done.join(' / ') : '新しいメモなし'));
+    return JSON.stringify({ success: true, imported: done });
+  } catch (e) {
+    Logger.log('Obsidian取込エラー: ' + e.message);
+    return JSON.stringify({ success: false, error: e.message });
+  } finally { lock.releaseLock(); }
+}
+
+function setupObsidianImportTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) { if (t.getHandlerFunction() === 'importObsidianNotesTrigger') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('importObsidianNotesTrigger').timeBased().everyMinutes(30).create();
+  return importObsidianNotes(false);
+}
+function removeObsidianImportTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) { if (t.getHandlerFunction() === 'importObsidianNotesTrigger') ScriptApp.deleteTrigger(t); });
+  return JSON.stringify({ success: true });
+}
+function getObsidianImportStatus() {
+  var active = ScriptApp.getProjectTriggers().some(function(t) { return t.getHandlerFunction() === 'importObsidianNotesTrigger'; });
+  var last = {}; try { last = JSON.parse(PropertiesService.getScriptProperties().getProperty('obsLastRun') || '{}'); } catch (e) {}
+  var folder = null; try { folder = _obsFolder(); } catch (e) {}
+  return JSON.stringify({ active: active, folder: !!folder, folderUrl: folder ? folder.getUrl() : '', last: last });
+}
+
+/* 議事録ストアの保存: 画面側とサーバー取込の両方の更新を失わないよう、id ごとに新しい方を残す */
+function _mergeMeetingStore(curJson, incJson) {
+  var cur = {}, inc = {};
+  try { cur = JSON.parse(curJson || '{}'); } catch (e) {}
+  try { inc = JSON.parse(incJson || '{}'); } catch (e) { return incJson; }
+  var delM = (cur.deletedMeetings || []).concat(inc.deletedMeetings || []);
+  var delT = (cur.deletedTodos || []).concat(inc.deletedTodos || []);
+  var merge = function(a, b, del) {
+    var byId = {}, order = [];
+    (a || []).concat(b || []).forEach(function(x) {
+      if (!x || !x.id || del.indexOf(x.id) >= 0) return;
+      var p = byId[x.id];
+      if (!p) { byId[x.id] = x; order.push(x.id); return; }
+      if (String(x.updatedAt || '') >= String(p.updatedAt || '')) byId[x.id] = x;
+    });
+    return order.map(function(id) { return byId[id]; });
+  };
+  var out = {
+    meetings: merge(cur.meetings, inc.meetings, delM).sort(function(x, y) { return String(y.date || '').localeCompare(String(x.date || '')); }),
+    todos: merge(cur.todos, inc.todos, delT),
+    deletedMeetings: delM.filter(function(v, i) { return delM.indexOf(v) === i; }).slice(-500),
+    deletedTodos: delT.filter(function(v, i) { return delT.indexOf(v) === i; }).slice(-1000)
+  };
+  return JSON.stringify(out);
 }
 
 /**

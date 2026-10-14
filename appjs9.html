@@ -9,7 +9,8 @@
    ※ このファイルの文字列にスラッシュ2つやスラッシュ+アスタリスクを書かないこと
 ============================================================ */
 const MT_STORE='議事録';
-let _mt={meetings:[],todos:[]}, _mtLoaded=false, _mtLoading=false;
+let _mt={meetings:[],todos:[],deletedMeetings:[],deletedTodos:[]}, _mtLoaded=false, _mtLoading=false;
+const _nowIso=()=>new Date().toISOString();
 let _mtTab='input', _mtDraft=null, _mtTerm='', _mtTodoFilter='open';
 const MT_CATS=['販売予測','販売時期','適合','構成表','在庫・終息','注文','見本機日程','エコ・リユース','課題・質問','部品・メーカー','メモ'];
 function _e9(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -19,7 +20,7 @@ function _mtLoad(cb){
   if(typeof google==='undefined'||!google.script){_mtLoaded=true;cb&&cb();return;}
   if(_mtLoading)return; _mtLoading=true;
   google.script.run.withSuccessHandler(res=>{
-    try{const o=JSON.parse(res||'{}');if(!o.__error){_mt.meetings=o.meetings||[];_mt.todos=o.todos||[];}}catch(e){}
+    try{const o=JSON.parse(res||'{}');if(!o.__error){_mt.meetings=o.meetings||[];_mt.todos=o.todos||[];_mt.deletedMeetings=o.deletedMeetings||[];_mt.deletedTodos=o.deletedTodos||[];}}catch(e){}
     _mtLoaded=true;_mtLoading=false;cb&&cb();
   }).withFailureHandler(()=>{_mtLoaded=true;_mtLoading=false;cb&&cb();}).loadStore(MT_STORE);
 }
@@ -117,7 +118,7 @@ function _crmPush(meeting,silent){
     attendees:meeting.attendees||'',next:meeting.next||'',raw:meeting.raw||'',groups};
   google.script.run.withSuccessHandler(res=>{
     let r;try{r=JSON.parse(res);}catch(e){r={success:false,error:'応答を読み取れません'};}
-    if(r.success){meeting.crm={meetingId:r.meetingId,at:_todayStr(),activities:r.activities};delete meeting.crmError;
+    if(r.success){meeting.crm={meetingId:r.meetingId,at:_todayStr(),activities:r.activities};delete meeting.crmError;meeting.updatedAt=_nowIso();
       if(!silent)showToast(`🔗 CRMに記録しました（議事録1件・活動 ${r.activities}件）`,4000);}
     else{meeting.crmError=r.error;showToast('⚠️ CRMへの記録に失敗: '+r.error,7000);}
     _mtSave();if(currentPage==='meetings')renderMeetings();
@@ -126,6 +127,42 @@ function _crmPush(meeting,silent){
 function _mtResendCrm(id){const m=_mt.meetings.find(x=>x.id===id);if(!m)return;
   if(m.crm&&!confirm('このCRMへは記録済みです。もう一度記録しますか？（CRM側に重複して登録されます）'))return;
   _crmPush(m);}
+
+/* ---------- Obsidian 自動取込（30分ごと） ---------- */
+let _obsStatus=null;
+function _obsLoadStatus(cb){
+  if(typeof google==='undefined'||!google.script){_obsStatus={active:false};cb&&cb();return;}
+  google.script.run.withSuccessHandler(res=>{try{_obsStatus=JSON.parse(res);}catch(e){_obsStatus={active:false};}cb&&cb();})
+    .withFailureHandler(()=>{_obsStatus={active:false};cb&&cb();}).getObsidianImportStatus();
+}
+function _obsBarHtml(){
+  if(!_obsStatus){_obsLoadStatus(()=>{if(currentPage==='meetings')renderMeetings();});return '<span class="pt-muted">Obsidian自動取込: 確認中...</span>';}
+  const l=_obsStatus.last||{};
+  const lastTxt=l.at?`最終 ${String(l.at).slice(5,16).replace('T',' ')}（${(l.imported||[]).length}件）`:'未実行';
+  return `<span style="font-size:12px;">🟣 Obsidian自動取込: ${_obsStatus.active?'<b style="color:#16a34a;">有効（30分ごと）</b>':'<b style="color:#b45309;">未設定</b>'} ／ ${_e9(lastTxt)}</span>
+    ${_obsStatus.folderUrl?`<a class="q" style="font-size:11px;" href="${_e9(_obsStatus.folderUrl)}" target="_blank" rel="noopener">📂 取込フォルダ</a>`:''}
+    ${_obsStatus.active?'':'<button class="btn btn-sm btn-primary" onclick="_obsCall(\'setupObsidianImportTrigger\',this)">有効化する</button>'}
+    <button class="btn btn-sm" onclick="_obsCall('importObsidianNotes',this)">今すぐ取り込む</button>`;
+}
+function _obsCall(fn,btn){
+  if(btn){btn.disabled=true;btn.textContent='処理中...';}
+  google.script.run.withSuccessHandler(res=>{
+    let r;try{r=JSON.parse(res);}catch(e){r={success:false,error:'応答を読み取れません'};}
+    if(!r.success){showToast('⚠️ '+r.error,7000);_obsStatus=null;renderMeetings();return;}
+    const n=(r.imported||[]).length;
+    showToast(n?`✅ Obsidianから ${n}件取り込みました（画面を更新します）`:'新しいメモはありませんでした',4000);
+    if(n)setTimeout(()=>location.reload(),1500);else{_obsStatus=null;renderMeetings();}
+  }).withFailureHandler(err=>{showToast('⚠️ '+err.message,7000);_obsStatus=null;renderMeetings();})[fn]();
+}
+// 自動取込した議事録の確認・修正
+function _mtMarkReviewed(id){const m=_mt.meetings.find(x=>x.id===id);if(!m)return;m.reviewed=true;m.updatedAt=_nowIso();_mtSave();renderMeetings();}
+function _mtEditMeeting(id){
+  const m=_mt.meetings.find(x=>x.id===id);if(!m)return;
+  _mtDraft={editingId:m.id,date:m.date,seriesId:m.seriesId||'__customer',kind:m.kind||'customer',customer:m.customer||'fuji',title:m.title,
+    attendees:m.attendees||'',next:m.next||'',raw:m.raw||'',rows:JSON.parse(JSON.stringify(m.rows||[]))};
+  _mtTab='input';renderMeetings();
+  showToast('✏️ 振り分けを修正して「保存」すると、この議事録を上書きします');
+}
 
 /* ---------- メモの自動振り分け ---------- */
 const _MT_CODE=/(?:^|[^A-Za-z0-9])([A-Z]{1,2}\d{2,3}[A-Z]?(?:甘)?)(?![0-9])/g;
@@ -165,7 +202,7 @@ function _mtIsTodo(t,cat){
 function _mtTopicCat(t){return /(東芝|ケル|板橋|三球|キョウデン|オムロン|ニデック|カーライル|LED|ドライバ|キー|部品|メーカー|ピン|コネクタ)/.test(t)?'部品・メーカー':'メモ';}
 
 function _mtParse(raw,base){
-  const rows=[];let ctx=null,next='',prevBlank=true;
+  const rows=[],attendees=[];let ctx=null,next='',prevBlank=true;
   const mk=(code,text,extra)=>{
     const cat=(extra&&extra.cat)||_mtClassify(text);
     const r={id:'r'+Math.random().toString(36).slice(2,9),kind:'machine',code,name:'',cat,text,fc:_mtForecast(text),date:'',todo:_mtIsTodo(text,cat),due:'',apply:false};
@@ -182,6 +219,9 @@ function _mtParse(raw,base){
     const t=line.replace(/[\s　]+$/,'').trim();
     if(!t){prevBlank=true;return;}
     const indented=/^[\s　]/.test(line);
+    // 冒頭の「藤商事：丸山様、長谷川様」「サン電子：…」は参加者
+    const at=!ctx&&!rows.length&&t.match(/^([^：:]{1,15})[：:]\s*(.+)$/);
+    if(at&&/様|、|,|，/.test(at[2])&&!/^[A-Z]{1,2}\d{2,3}/.test(t)){attendees.push(at[1].trim()+'：'+at[2].trim());prevBlank=false;return;}
     const nx=t.match(/^次回\s*(.+)/);
     if(nx){next=_mtDate(nx[1],base);rows.push(topic('次回打ち合わせ',t));prevBlank=false;return;}
     const codes=_mtCodes(t);
@@ -213,7 +253,7 @@ function _mtParse(raw,base){
     if(ctx&&ctx.type==='topic'){rows.push(topic(ctx.name,t));prevBlank=false;return;}
     rows.push(topic('その他',t));prevBlank=false;
   });
-  return {rows,next};
+  return {rows,next,attendees};
 }
 
 /* ---------- 画面 ---------- */
@@ -249,7 +289,9 @@ function _mtInputHtml(){
     <td><input class="me-in" type="date" value="${_e9(r.due)}" onchange="_mtSetRow(${i},'due',this.value)"></td>
     <td class="c"><button class="btn btn-sm" style="padding:0 6px;" onclick="_mtDraft.rows.splice(${i},1);renderMeetings()">✕</button></td></tr>`).join('');
   return `
+    <div class="pt-bar">${_obsBarHtml()}</div>
     <div class="pt-bar">${_crmBarHtml()}</div>
+    ${d.editingId?'<div class="pt-info" style="background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:6px 10px;">✏️ 保存済みの議事録を修正中です。「保存」で上書きします。</div>':''}
     <div class="pt-wrap" style="max-height:none;padding:12px;margin-bottom:10px;">
       <div style="display:flex;gap:8px;align-items:end;margin-bottom:8px;">
         <label class="me-f" style="flex:1;">会議の種類<select class="me-in" onchange="_mtPickKind(this.value)">${_mtKindOptions(d.seriesId)}</select></label>
@@ -285,6 +327,7 @@ function _mtAutoSplit(){
   const p=_mtParse(raw,_mtDraft.date);
   _mtDraft.rows=p.rows;
   if(p.next&&!_mtDraft.next)_mtDraft.next=p.next;
+  if(p.attendees&&p.attendees.length&&!_mtDraft.attendees)_mtDraft.attendees=p.attendees.join(' ／ ');
   renderMeetings();
   showToast(`⚡ ${p.rows.length}行に振り分けました（機種 ${new Set(p.rows.filter(r=>r.kind==='machine').map(r=>r.code)).size}件）`);
 }
@@ -304,13 +347,15 @@ function _mtSaveDraft(){
   const d=_mtDraft;if(!d||!d.rows||!d.rows.length){showToast('⚠️ 行がありません');return;}
   const el=document.getElementById('mt-raw');if(el)d.raw=el.value;
   const cid=d.customer||'fuji';
-  const meeting={id:'mt'+Date.now(),date:d.date,customer:cid,kind:d.kind||'customer',seriesId:d.seriesId||'',title:d.title,attendees:d.attendees,next:d.next,raw:d.raw,
+  const editing=d.editingId?_mt.meetings.find(x=>x.id===d.editingId):null;
+  const meeting={id:editing?editing.id:'mt'+Date.now(),date:d.date,customer:cid,kind:d.kind||'customer',seriesId:d.seriesId||'',title:d.title,attendees:d.attendees,next:d.next,raw:d.raw,updatedAt:_nowIso(),
+    auto:editing?editing.auto:false,reviewed:true,src:editing?editing.src:undefined,crm:editing?editing.crm:undefined,
     rows:d.rows.map(r=>Object.assign({},r,{key:r.kind==='machine'&&r.code?_ikey(r.code,cid):''}))};
   let nTodo=0,nApply=0;
   const addTodo=(text,key,topic,due)=>{
-    if(_mt.todos.some(t=>!t.done&&t.text===text&&t.key===key))return;
+    if(_mt.todos.some(t=>(!t.done||t.meetingId===meeting.id)&&t.text===text&&t.key===key))return;
     _mt.todos.push({id:'td'+Date.now()+Math.random().toString(36).slice(2,6),text,key:key||'',topic:topic||'',customer:cid,
-      due:due||d.next||'',owner:'',done:false,created:d.date,meetingId:meeting.id});
+      due:due||d.next||'',owner:'',done:false,created:d.date,meetingId:meeting.id,updatedAt:_nowIso()});
     nTodo++;
   };
   meeting.rows.forEach(r=>{
@@ -327,12 +372,12 @@ function _mtSaveDraft(){
       nApply++;
     }
   });
-  _mt.meetings.unshift(meeting);
+  if(editing)_mt.meetings[_mt.meetings.indexOf(editing)]=meeting;else _mt.meetings.unshift(meeting);
   _mtSave();
   if(nApply)saveToGAS('定例の内容を機種データへ反映');
   addLog(`📝 議事録を保存: ${d.date} ${d.title}（${meeting.rows.length}行／TODO ${nTodo}件／反映 ${nApply}件）`);
   showToast(`✅ 保存しました（TODO ${nTodo}件・機種データ反映 ${nApply}件）`,5000);
-  if(state.config.crmAutoPush!==false&&_crmStatus&&_crmStatus.connected)_crmPush(meeting);
+  if(!meeting.crm&&state.config.crmAutoPush!==false&&_crmStatus&&_crmStatus.connected)_crmPush(meeting);
   _mtDraft=null;_mtTab='know';renderMeetings();
 }
 
@@ -392,27 +437,27 @@ function _mtTodoHtml(){
     <div class="pt-wrap"><table class="pt"><thead><tr><th>完了</th><th class="pt-cur">期限</th><th>内容</th><th>機種/トピック</th><th>担当</th><th>登録日</th><th></th></tr></thead>
     <tbody>${rows||'<tr><td colspan="7" class="c same" style="padding:20px;">該当するTODOはありません</td></tr>'}</tbody></table></div>`;
 }
-function _mtToggleTodo(id,done){const t=_mt.todos.find(x=>x.id===id);if(!t)return;t.done=done;t.doneAt=done?_todayStr():'';_mtSave();renderMeetings();}
-function _mtTodoField(id,f,v){const t=_mt.todos.find(x=>x.id===id);if(!t)return;t[f]=v;_mtSave();}
-function _mtDelTodo(id){if(!confirm('このTODOを削除しますか？'))return;_mt.todos=_mt.todos.filter(x=>x.id!==id);_mtSave();renderMeetings();}
+function _mtToggleTodo(id,done){const t=_mt.todos.find(x=>x.id===id);if(!t)return;t.done=done;t.doneAt=done?_todayStr():'';t.updatedAt=_nowIso();_mtSave();renderMeetings();}
+function _mtTodoField(id,f,v){const t=_mt.todos.find(x=>x.id===id);if(!t)return;t[f]=v;t.updatedAt=_nowIso();_mtSave();}
+function _mtDelTodo(id){if(!confirm('このTODOを削除しますか？'))return;_mt.todos=_mt.todos.filter(x=>x.id!==id);(_mt.deletedTodos=_mt.deletedTodos||[]).push(id);_mtSave();renderMeetings();}
 function _mtNewTodo(){
   const text=(prompt('TODOの内容')||'').trim();if(!text)return;
   const code=(prompt('機種コード（無ければ空欄）')||'').trim();
-  _mt.todos.push({id:'td'+Date.now(),text,key:code?_ikey(code):'',topic:code?'':'手入力',customer:_importCust(),due:'',owner:'',done:false,created:_todayStr()});
+  _mt.todos.push({id:'td'+Date.now(),text,key:code?_ikey(code):'',topic:code?'':'手入力',customer:_importCust(),due:'',owner:'',done:false,created:_todayStr(),updatedAt:_nowIso()});
   _mtSave();renderMeetings();
 }
 
 /* 議事録一覧 */
 function _mtListHtml(){
   const list=_mt.meetings.filter(m=>_custMatch(m.customer||'fuji'));
-  return `<div class="pt-info">${list.length}件の議事録。行クリックで内容（貼り付けた元メモ）を表示します。</div>
+  return `<div class="pt-bar">${_obsBarHtml()}</div><div class="pt-info">${list.length}件の議事録。行クリックで内容（元メモ）を表示。🟣はObsidianから自動取込したもの（「修正」で振り分けを直せます）。</div>
     <div class="pt-wrap"><table class="pt"><thead><tr><th class="pt-cur">会議日</th><th>種類</th><th>得意先</th><th>会議名</th><th>参加者</th><th>行数</th><th>機種</th><th>次回</th><th>CRM</th><th></th></tr></thead><tbody>
-    ${list.map(m=>`<tr class="click" onclick="_mtShow('${m.id}')"><td class="c pt-cur">${_e9(m.date)}</td><td>${m.kind==='internal'?'🏢 社内':m.seriesId&&!/^__/.test(m.seriesId)?'📅 定例':'🤝 お客様'}</td><td>${_e9(m.kind==='internal'?'—':_custName(m.customer||'fuji'))}</td><td class="name">${_e9(m.title)}</td>
+    ${list.map(m=>`<tr class="click" onclick="_mtShow('${m.id}')"><td class="c pt-cur">${_e9(m.date)}</td><td>${m.kind==='internal'?'🏢 社内':m.seriesId&&!/^__/.test(m.seriesId)?'📅 定例':'🤝 お客様'}</td><td>${_e9(m.kind==='internal'?'—':_custName(m.customer||'fuji'))}</td><td class="name">${_e9(m.title)}${m.auto?(m.reviewed?' <span class="pt-tag">🟣Obsidian</span>':' <span class="st st-yellow" style="padding:0 5px;">🟣自動・未確認</span>'):''}</td>
       <td>${_e9(m.attendees||'')}</td><td class="num">${(m.rows||[]).length}</td>
       <td class="spec" style="max-width:260px;">${_e9([...new Set((m.rows||[]).filter(r=>r.kind==='machine').map(r=>r.code))].join(', '))}</td>
       <td class="c">${_e9(m.next||'')}</td>
       <td class="c" onclick="event.stopPropagation()">${m.crm?`<span class="st st-green" style="padding:0 6px;" title="${_e9(m.crm.meetingId)}">記録済</span>`:m.crmError?`<button class="btn btn-sm" style="padding:0 6px;color:#dc2626;" title="${_e9(m.crmError)}" onclick="_mtResendCrm('${m.id}')">再送</button>`:`<button class="btn btn-sm" style="padding:0 6px;" onclick="_mtResendCrm('${m.id}')">送信</button>`}</td>
-      <td class="c" onclick="event.stopPropagation()"><button class="btn btn-sm" style="padding:0 6px;" onclick="_mtDelMeeting('${m.id}')">削除</button></td></tr>`).join('')
+      <td class="c" onclick="event.stopPropagation()" style="white-space:nowrap;">${m.auto&&!m.reviewed?`<button class="btn btn-sm" style="padding:0 6px;" onclick="_mtMarkReviewed('${m.id}')">確認済み</button> `:''}<button class="btn btn-sm" style="padding:0 6px;" onclick="_mtEditMeeting('${m.id}')">修正</button> <button class="btn btn-sm" style="padding:0 6px;" onclick="_mtDelMeeting('${m.id}')">削除</button></td></tr>`).join('')
       ||'<tr><td colspan="10" class="c same" style="padding:20px;">まだ議事録がありません</td></tr>'}</tbody></table></div>`;
 }
 function _mtShow(id){
@@ -422,7 +467,7 @@ function _mtShow(id){
 }
 function _mtDelMeeting(id){
   if(!confirm('この議事録を削除しますか？（登録済みのTODOは残ります）'))return;
-  _mt.meetings=_mt.meetings.filter(x=>x.id!==id);_mtSave();renderMeetings();
+  _mt.meetings=_mt.meetings.filter(x=>x.id!==id);(_mt.deletedMeetings=_mt.deletedMeetings||[]).push(id);_mtSave();renderMeetings();
 }
 
 /* ---------- 他画面との連携 ---------- */
@@ -442,6 +487,8 @@ function _mtTodoStrip(){
   const today=_todayStr(),soon=_addDays(today,3),out=[];
   _mt.todos.filter(t=>!t.done&&_custMatch(t.customer||'fuji')&&t.due&&t.due<=soon).sort((a,b)=>String(a.due).localeCompare(String(b.due))).slice(0,6)
     .forEach(t=>out.push({c:t.due<today?'st-red':'st-yellow',txt:`✅ ${t.key?_dispKey(t.key)+' ':''}${t.text.slice(0,30)}（${t.due<today?'期限超過':t.due}）`,act:`showPage('meetings');_mtTab='todo';renderMeetings()`}));
+  const unrev=_mt.meetings.filter(m=>m.auto&&!m.reviewed&&_custMatch(m.customer||'fuji'));
+  if(unrev.length)out.unshift({c:'st-blue',txt:`🟣 Obsidianから自動取込した議事録 ${unrev.length}件を確認`,act:`showPage('meetings');_mtTab='list';renderMeetings()`});
   const nx=_mt.meetings.filter(m=>_custMatch(m.customer||'fuji')&&m.next&&m.next>=today).map(m=>m.next).sort()[0];
   if(nx&&nx<=_addDays(today,7))out.push({c:'st-blue',txt:`📅 次回定例 ${nx}`,act:`showPage('meetings')`});
   return out;

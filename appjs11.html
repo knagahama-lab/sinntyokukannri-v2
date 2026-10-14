@@ -1,0 +1,147 @@
+<script>
+/* ============================================================
+   業務フロー進捗（自社の業務フロー「業務フロー作成260701」より）
+   段階「機種開発～量産準備」の全部署・全工程(43工程)を機種ごとにチェックする。
+   画面は業務フロー図と同じ「部署の列 × 工程の順番」の表。
+   ・各工程: 完了チェック・完了日・担当・メモ（state.flowProgress[機種キー][工程ID]）
+   ・既存データとの連動（記録が無い場合の自動判定）:
+       サブFIX ← HW構成一覧表のサブFIX日 / 申請 ← HW構成一覧表の申請日
+       長納期部品の生産計画情報 ← 長納期計画PDFの取込 / 仮の構成表 ← 構成表(量産準備用)の取得
+   ※ このファイルの文字列にスラッシュ2つやスラッシュ+アスタリスクを書かないこと
+============================================================ */
+const FLOW_LANES=['客先・イベント','営業','設計・ハード','生産技術・品質管理','資材・購買','開発・ソフト','仕入れ先・メーカー','生産工場・協力会社'];
+const FLOW_PHASE='機種開発～量産準備';
+const FLOW_DEV=[{"id": "d01", "row": 1, "lane": -1, "span": [3, 4], "label": "量産設備見積フォロー"}, {"id": "d02", "row": 2, "lane": 2, "span": null, "label": "量産設備見積依頼"}, {"id": "d03", "row": 2, "lane": 3, "span": null, "label": "実装見積依頼"}, {"id": "d04", "row": 2, "lane": 7, "span": null, "label": "見積書作成　実装・ICT・O/S・　金型・組立"}, {"id": "d05", "row": 3, "lane": 0, "span": null, "label": "量産設備見積確認"}, {"id": "d06", "row": 3, "lane": 1, "span": null, "label": "量産設備見積・提出"}, {"id": "d07", "row": 3, "lane": 2, "span": null, "label": "量産設備見積照査・展開"}, {"id": "d08", "row": 3, "lane": 3, "span": null, "label": "実装見積照査"}, {"id": "d09", "row": 3, "lane": 4, "span": null, "label": "見積書番号　ナンバリング"}, {"id": "d10", "row": 4, "lane": 3, "span": null, "label": "QC・作業標準書　作成依頼"}, {"id": "d11", "row": 4, "lane": 7, "span": null, "label": "QC・作業標準書　作成"}, {"id": "d12", "row": 5, "lane": 0, "span": null, "label": "量産設備発注"}, {"id": "d13", "row": 5, "lane": 4, "span": null, "label": "量産設備発注"}, {"id": "d14", "row": 6, "lane": 0, "span": null, "label": "サブFIX　機種評価依頼"}, {"id": "d15", "row": 6, "lane": 2, "span": null, "label": "工数算出　保守"}, {"id": "d16", "row": 7, "lane": 0, "span": null, "label": "パネル貸し出し"}, {"id": "d17", "row": 7, "lane": 2, "span": null, "label": "受取　機種評価実施"}, {"id": "d18", "row": 8, "lane": 0, "span": null, "label": "信頼性試験結果報告書　作成・回覧"}, {"id": "d19", "row": 8, "lane": 2, "span": null, "label": "信頼性試験結果報告書　作成・回覧"}, {"id": "d20", "row": 9, "lane": 0, "span": null, "label": "サブFIX"}, {"id": "d21", "row": 9, "lane": 3, "span": null, "label": "量産検査ライブラリ"}, {"id": "d22", "row": 9, "lane": 5, "span": null, "label": "量産検査ライブラリ"}, {"id": "d23", "row": 10, "lane": -1, "span": [1, 4], "label": "商品説明会"}, {"id": "d24", "row": 11, "lane": -1, "span": [1, 4], "label": "(仕様DR)設計DR"}, {"id": "d25", "row": 12, "lane": -1, "span": [1, 5], "label": "試作DR(ソフトは社内開発している場合、していない場合は参加不要)"}, {"id": "d26", "row": 13, "lane": 0, "span": null, "label": "申請"}, {"id": "d27", "row": 13, "lane": 3, "span": null, "label": "実装費見積依頼"}, {"id": "d28", "row": 13, "lane": 7, "span": null, "label": "実装費見積"}, {"id": "d29", "row": 14, "lane": 2, "span": null, "label": "1B部品表作成　製造変更承認書　1B登録"}, {"id": "d30", "row": 14, "lane": 3, "span": null, "label": "確認"}, {"id": "d31", "row": 14, "lane": 4, "span": null, "label": "確認　オペレート"}, {"id": "d32", "row": 15, "lane": 0, "span": null, "label": "長納期部品の調達活動用　生産計画情報"}, {"id": "d33", "row": 15, "lane": 4, "span": null, "label": "長納期手配指示書作成　1B/単品部品対象"}, {"id": "d34", "row": 16, "lane": 0, "span": null, "label": "確認・押印"}, {"id": "d35", "row": 16, "lane": 1, "span": null, "label": "関係者に配信　長納期手配指示書提出"}, {"id": "d36", "row": 17, "lane": 1, "span": null, "label": "保管"}, {"id": "d37", "row": 18, "lane": 0, "span": null, "label": "①部品表示変更確認　②量産設備係る検収確認　③生産地確認　④構成確認　⑤L/T確認表　⑥量産見積り　仮の構成表"}, {"id": "d38", "row": 18, "lane": 1, "span": null, "label": "作成　①②④⑤⑥　仮構成表展開"}, {"id": "d39", "row": 18, "lane": 3, "span": null, "label": "見積依頼・取得"}, {"id": "d40", "row": 18, "lane": 4, "span": null, "label": "作成　③"}, {"id": "d41", "row": 18, "lane": 7, "span": null, "label": "見積発行"}, {"id": "d42", "row": 19, "lane": 0, "span": null, "label": "確認・押印"}, {"id": "d43", "row": 19, "lane": 1, "span": null, "label": "確認・提出　①②③④⑤⑥"}];
+if(!state.flowProgress)state.flowProgress={};
+let _fpSel='', _fpTab='progress', _fpOpenOnly=false, _fpLane='';
+function _e11(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function _fpDate(s){
+  const m=String(s||'').match(/^(\d{2,4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+  if(!m)return '';
+  const y=m[1].length===2?'20'+m[1]:m[1];
+  return `${y}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+}
+// 既存データからの自動判定
+function _fpAuto(key,id){
+  const v=_mdbView(key)||{};const hw=v.hw||{};const t=_todayStr();
+  if(id==='d20'){const d=_fpDate(hw.subFixDate);if(d&&d<=t)return {date:d,src:'HW構成一覧表のサブFIX日'};}
+  if(id==='d26'){const d=_fpDate(hw.applyDate);if(d&&d<=t)return {date:d,src:'HW構成一覧表の申請日'};}
+  if(id==='d32'){const ll=v.longlead||{};if(ll.deliveryDate||ll.qty)return {date:'',src:'長納期計画PDFを取込済み'};}
+  if(id==='d37'){const r=((state.configSheets[key]||{}).prep)||{};if(r.got)return {date:r.got,src:'構成表（量産準備用）を取得済み'};}
+  return null;
+}
+function _fpStep(key,id){
+  const rec=((state.flowProgress[key]||{})[id])||null;
+  if(rec&&rec.done!==undefined)return Object.assign({auto:false},rec);
+  const a=_fpAuto(key,id);
+  if(a)return {done:true,date:a.date,owner:'',note:'',auto:true,src:a.src};
+  return Object.assign({done:false,date:'',owner:'',note:'',auto:false},rec||{});
+}
+function _fpSummary(key){
+  let done=0;let next=null;
+  FLOW_DEV.forEach(s=>{const st=_fpStep(key,s.id);if(st.done)done++;else if(!next)next=s;});
+  return {done,total:FLOW_DEV.length,pct:Math.round(done/FLOW_DEV.length*100),next};
+}
+function _fpLaneName(s){return s.span?FLOW_LANES.slice(s.span[0],s.span[1]+1).map(x=>x.replace(/・.*$/,'')).join('・')+'（合同）':FLOW_LANES[s.lane];}
+
+function _fpToggle(key,id,done){
+  const r=state.flowProgress[key]=state.flowProgress[key]||{};
+  const cur=r[id]||{};
+  r[id]=Object.assign({},cur,{done,date:done?(cur.date||_todayStr()):'',by:(typeof _currentUserEmail!=='undefined'?_currentUserEmail:'')});
+  const s=FLOW_DEV.find(x=>x.id===id);
+  addLog(`📈 業務フロー ${_dispKey(key)}: ${s?s.label.slice(0,20):id} ${done?'完了':'未完了に戻す'}`);
+  saveToGAS();
+  const w=document.querySelector('#fp-detail .pt-wrap');const st=w?w.scrollTop:0;
+  renderFlowPage();
+  const w2=document.querySelector('#fp-detail .pt-wrap');if(w2)w2.scrollTop=st;
+}
+function _fpEdit(key,id){
+  const s=FLOW_DEV.find(x=>x.id===id);const st=_fpStep(key,id);
+  _overlay('fp-edit',`📈 ${_e11(_dispKey(key))} — ${_e11(s.label)}`,`
+    <div class="pt-info">部署: ${_e11(_fpLaneName(s))}　／　順番: ${s.row}${st.auto?`　／　自動判定: ${_e11(st.src)}`:''}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <label class="me-f">状態<select id="fpe-done" class="me-in"><option value="1"${st.done?' selected':''}>完了</option><option value="0"${!st.done?' selected':''}>未完了</option></select></label>
+      <label class="me-f">完了日<input id="fpe-date" type="date" class="me-in" value="${_e11(st.date||'')}"></label>
+      <label class="me-f">担当<input id="fpe-owner" class="me-in" value="${_e11(st.owner||'')}"></label>
+      <label class="me-f">予定日<input id="fpe-plan" type="date" class="me-in" value="${_e11(st.plan||'')}"></label>
+    </div>
+    <label class="me-f" style="margin-top:10px;">メモ<textarea id="fpe-note" class="me-in" rows="3">${_e11(st.note||'')}</textarea></label>
+    <div style="display:flex;gap:6px;margin-top:12px;">
+      <button class="btn btn-sm" onclick="_fpClear('${_e11(key)}','${id}')">記録を消す（自動判定に戻す）</button><span style="flex:1;"></span>
+      <button class="btn btn-primary btn-sm" onclick="_fpSaveEdit('${_e11(key)}','${id}')">保存</button></div>`,560);
+}
+function _fpSaveEdit(key,id){
+  const g=x=>document.getElementById('fpe-'+x).value;
+  const r=state.flowProgress[key]=state.flowProgress[key]||{};
+  const done=g('done')==='1';
+  r[id]={done,date:done?(g('date')||_todayStr()):g('date'),owner:g('owner').trim(),plan:g('plan'),note:g('note')};
+  saveToGAS();document.getElementById('fp-edit').remove();renderFlowPage();
+}
+function _fpClear(key,id){const r=state.flowProgress[key];if(r)delete r[id];saveToGAS();document.getElementById('fp-edit').remove();renderFlowPage();}
+
+/* ---------- 画面 ---------- */
+function renderFlowPage(){
+  const tabs=`<div class="pt-bar">${[['progress','📈 業務フロー進捗（'+FLOW_PHASE+'）'],['vendor','🔧 委託先フロー（従来）']].map(([k,l])=>`<button class="pt-chip${_fpTab===k?' on':''}" onclick="_fpTab='${k}';renderFlowPage()">${l}</button>`).join('')}</div>`;
+  if(_fpTab==='vendor'){renderFlow();const el=document.getElementById('page-flow');el.insertAdjacentHTML('afterbegin',tabs);return;}
+  if(!_mdbLoadStarted&&typeof _loadModelDB==='function')_loadModelDB();
+  const rows=_modelRows('active');
+  if(!_fpSel||!rows.some(r=>r.key===_fpSel))_fpSel=(rows.find(r=>r.m)||rows[0]||{}).key||'';
+  const ov=rows.map(r=>{const s=_fpSummary(r.key);const v=r.db||{};return {r,s,title:v.title||'',sales:v.salesDate||(v.longlead||{}).deliveryDate||''};})
+    .sort((a,b)=>(!!b.r.m-!!a.r.m)||String(a.sales||'9999').localeCompare(String(b.sales||'9999')));
+  const bar=p=>`<div style="display:flex;align-items:center;gap:6px;"><div style="flex:1;min-width:80px;height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;"><div style="width:${p}%;height:100%;background:${p>=100?'#16a34a':'#2563eb'};"></div></div><b style="font-size:11px;">${p}%</b></div>`;
+  const ovHtml=`<div class="pt-wrap" style="max-height:260px;"><table class="pt"><thead><tr><th>機種</th><th>タイトル</th><th class="pt-cur">販売時期</th><th style="min-width:140px;">進捗</th><th>完了</th><th>次の工程</th><th>担当部署</th></tr></thead><tbody>
+    ${ov.map(o=>`<tr class="click" style="${o.r.key===_fpSel?'outline:2px solid #2563eb;outline-offset:-2px;':''}" onclick="_fpSel='${_e11(o.r.key)}';renderFlowPage()">
+      <td class="name">${_e11(_dispKey(o.r.key))}${o.r.m?'<span class="pt-tag">登録</span>':''}</td><td class="spec">${_e11(o.title)}</td>
+      <td class="c pt-cur">${_e11(o.sales||'—')}</td><td>${bar(o.s.pct)}</td><td class="num">${o.s.done} / ${o.s.total}</td>
+      <td class="spec" style="max-width:260px;">${o.s.next?_e11(o.s.next.label):'✅ 完了'}</td><td>${o.s.next?_e11(_fpLaneName(o.s.next)):''}</td></tr>`).join('')
+      ||'<tr><td colspan="7" class="c same" style="padding:16px;">機種がありません</td></tr>'}</tbody></table></div>`;
+  document.getElementById('page-flow').innerHTML=tabs+`
+    <div class="pt-info">自社の業務フロー（業務フロー作成260701）の「${FLOW_PHASE}」${FLOW_DEV.length}工程を機種ごとにチェックします。機種を選ぶと下にフロー表が出ます。</div>
+    ${ovHtml}<div id="fp-detail" style="margin-top:14px;">${_fpSel?_fpDetailHtml(_fpSel):''}</div>`;
+}
+function _fpDetailHtml(key){
+  const s=_fpSummary(key);const v=_mdbView(key)||{};
+  const maxRow=Math.max(...FLOW_DEV.map(x=>x.row));
+  const laneOn=i=>!_fpLane||String(i)===_fpLane;
+  const chip=st=>{
+    const x=FLOW_DEV.find(y=>y.id===st.id);const p=_fpStep(key,st.id);
+    if(_fpOpenOnly&&p.done)return '';
+    return `<div class="fp-step${p.done?' done':''}" title="${_e11((p.auto?'自動判定: '+p.src:'')+(p.note?' メモ: '+p.note:''))}">
+      <label style="display:flex;gap:5px;align-items:flex-start;cursor:pointer;"><input type="checkbox" ${p.done?'checked':''} onchange="_fpToggle('${_e11(key)}','${x.id}',this.checked)">
+        <span>${_e11(x.label)}</span></label>
+      <div class="fp-meta">${p.done?`<span class="st st-green" style="padding:0 5px;">${p.auto?'自動 ':''}${_e11(p.date||'完了')}</span>`:(p.plan?`<span class="st st-yellow" style="padding:0 5px;">予定 ${_e11(p.plan)}</span>`:'')}
+        ${p.owner?`<span class="pt-muted">${_e11(p.owner)}</span>`:''}<a href="#" class="q" style="font-size:10px;" onclick="event.preventDefault();_fpEdit('${_e11(key)}','${x.id}')">✎</a></div></div>`;
+  };
+  let body=`<tr class="pt-sec"><td colspan="${FLOW_LANES.length+1}">■ ${FLOW_PHASE}（${s.done}/${s.total} 完了・${s.pct}%）</td></tr>`;
+  for(let r=1;r<=maxRow;r++){
+    const inRow=FLOW_DEV.filter(x=>x.row===r);
+    const spanStep=inRow.find(x=>x.span);
+    let cells='';
+    for(let i=0;i<FLOW_LANES.length;i++){
+      if(spanStep&&i===spanStep.span[0]){
+        const cs=spanStep.span[1]-spanStep.span[0]+1;
+        cells+=`<td colspan="${cs}" style="vertical-align:top;background:#f8fafc;">${chip(spanStep)}</td>`;i+=cs-1;continue;
+      }
+      const here=inRow.filter(x=>!x.span&&x.lane===i);
+      cells+=`<td style="vertical-align:top;${laneOn(i)?'':'opacity:.25;'}">${here.map(chip).join('')}</td>`;
+    }
+    body+=`<tr><td class="c pt-muted" style="width:28px;">${r}</td>${cells}</tr>`;
+  }
+  return `<div class="pt-bar"><b style="font-size:14px;">${_e11(_dispKey(key))} ${_e11(v.title||'')}</b>
+      <span class="st ${s.pct>=100?'st-green':'st-blue'}">${s.done}/${s.total} 完了（${s.pct}%）</span>
+      ${s.next?`<span class="pt-muted">次: ${_e11(s.next.label)}（${_e11(_fpLaneName(s.next))}）</span>`:''}
+      <span style="flex:1;"></span>
+      <select class="pt-in" onchange="_fpLane=this.value;renderFlowPage()"><option value="">全部署</option>${FLOW_LANES.map((l,i)=>`<option value="${i}"${_fpLane===String(i)?' selected':''}>${l}</option>`).join('')}</select>
+      <label style="font-size:12px;display:flex;align-items:center;gap:4px;"><input type="checkbox" ${_fpOpenOnly?'checked':''} onchange="_fpOpenOnly=this.checked;renderFlowPage()"> 未完了のみ</label>
+      <button class="btn btn-sm" onclick="openMachineEditor('${_e11(key)}')">✏️ 機種詳細</button>
+      <button class="btn btn-sm" onclick="_ptPrint('業務フロー進捗 ${_e11(_dispKey(key))}','fp-wrap')">🖨 印刷</button></div>
+    <div class="pt-info">チェックで完了（今日の日付を記録）。✎で完了日・担当・予定日・メモ。「自動」はHW構成一覧表・長納期計画・構成表のデータから判定したもの。営業の列は黄色。</div>
+    <div class="pt-wrap" id="fp-wrap" style="max-height:calc(100vh - 220px);"><table class="pt fp-table"><thead><tr><th>順</th>${FLOW_LANES.map((l,i)=>`<th class="${i===1?'pt-cur':''}">${l}</th>`).join('')}</tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+// 機種詳細設定などに出す要約
+function _fpBadgeHtml(key){
+  const s=_fpSummary(key);
+  return `<a href="#" class="q" onclick="event.preventDefault();const o=document.getElementById('machine-editor');if(o)o.remove();_fpSel='${_e11(key)}';_fpTab='progress';showPage('flow');">📈 業務フロー（${FLOW_PHASE}）: ${s.done}/${s.total} 完了（${s.pct}%）${s.next?'　次: '+_e11(s.next.label.slice(0,24)):''}</a>`;
+}
+</script>

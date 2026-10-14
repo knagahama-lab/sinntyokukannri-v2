@@ -186,6 +186,7 @@ function saveToGAS(alertDesc){
       importArchive:state.importArchive,
       configSheets:state.configSheets,
       modelOverrides:state.modelOverrides,
+      flowProgress:state.flowProgress,
     });
     google.script.run.saveData(json);
     if(alertDesc && state.config.notifyEmail){

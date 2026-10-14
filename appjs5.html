@@ -811,7 +811,7 @@ function renderPage(page){
   else if(page==='meetings')renderMeetings();
   else if(page==='schedule')renderSchedule();
   else if(page==='eco')renderEco();
-  else if(page==='flow')renderFlow();
+  else if(page==='flow')(typeof renderFlowPage==='function'?renderFlowPage():renderFlow());
   else if(page==='admin')renderAdmin();
   else if(page==='log')renderLog();
   else if(page==='future')renderFuturePage();
@@ -871,6 +871,7 @@ function _init(saved){
       if(Array.isArray(s.importArchive))state.importArchive=s.importArchive;
       if(s.configSheets)state.configSheets=s.configSheets;
       if(s.modelOverrides)state.modelOverrides=s.modelOverrides;
+      if(s.flowProgress)state.flowProgress=s.flowProgress;
       if(s.driveFiles)Object.assign(state.driveFiles,s.driveFiles);
       if(s.linkageUrlOverrides)Object.assign(state.linkageUrlOverrides,s.linkageUrlOverrides);
       if(s.config&&s.config.tabSettings)Object.assign(state.config.tabSettings,s.config.tabSettings);

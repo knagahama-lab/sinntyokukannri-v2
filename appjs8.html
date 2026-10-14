@@ -242,6 +242,7 @@ function openMachineEditor(key){
     </div>
     <div class="me-h">■ 構成表</div>
     <div class="pt-wrap" style="max-height:none;"><table class="pt"><thead><tr><th>構成表</th><th>状態</th><th class="pt-cur">依頼期限</th><th>依頼日</th><th>取得日</th><th>URL</th></tr></thead><tbody>${csRows}</tbody></table></div>
+    <div style="margin-top:10px;font-size:12px;">${typeof _fpBadgeHtml==='function'?_fpBadgeHtml(key):''}</div>
     <div class="me-h">■ 打ち合わせ履歴（定例）</div>
     <div id="me-mt">${typeof _mtHistoryHtml==='function'?_mtHistoryHtml(key):''}</div>
     <div class="me-h">■ 備考</div>

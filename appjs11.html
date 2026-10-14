@@ -62,7 +62,11 @@ function _fpStep(key,id){
   if(a)return Object.assign({done:true,date:a.date,owner:'',note:'',auto:true,src:a.src},rec||{},{done:true});
   return Object.assign({done:false,date:'',owner:'',note:'',auto:false},rec||{});
 }
+// 販売済み・量産終了の機種（構成表が「対象外（販売済）」の機種）はフロー完了として扱う
+function _fpFinished(key){return typeof _csIsPast==='function'&&_csIsPast(key);}
+let _fpShowFinished=false;
 function _fpBall(key){
+  if(_fpFinished(key))return {step:null,manual:false,since:'',finished:true};
   const r=state.flowProgress[key]||{};
   if(r.__ball){const s=FLOW_DEV.find(x=>x.id===r.__ball);if(s)return {step:s,manual:true,since:r.__ballAt||''};}
   const s=FLOW_DEV.find(x=>!_fpStep(key,x.id).done);
@@ -231,13 +235,19 @@ function renderFlowPage(){
   if(_fpTab==='vendor'){renderFlow();document.getElementById('page-flow').insertAdjacentHTML('afterbegin',tabs);return;}
   if(!_mdbLoadStarted&&typeof _loadModelDB==='function')_loadModelDB();
   if(!_fdLoaded)_fdLoad(()=>{if(currentPage==='flow')renderFlowPage();});
-  const rows=_modelRows('active');
+  const all=_modelRows('active');
+  const nFinished=all.filter(r=>_fpFinished(r.key)).length;
+  const rows=_fpShowFinished?all:all.filter(r=>!_fpFinished(r.key));
+  window._fpFinishedN=nFinished;
   let moved=false;rows.forEach(r=>{if(_fpTrackBall(r.key))moved=true;});
   if(moved){clearTimeout(window._fpSaveT);window._fpSaveT=setTimeout(()=>saveToGAS(),1000);}
   if(!_fpSel||!rows.some(r=>r.key===_fpSel))_fpSel=(rows.find(r=>r.m)||rows[0]||{}).key||'';
   document.getElementById('page-flow').innerHTML=tabs+(_fpTab==='ball'?_fpBoardHtml(rows):_fpProgressHtml(rows));
 }
 
+function _fpFinishedToggle(){
+  return `<label style="font-size:12px;display:flex;align-items:center;gap:4px;margin-left:8px;"><input type="checkbox" ${_fpShowFinished?'checked':''} onchange="_fpShowFinished=this.checked;renderFlowPage()"> 販売済み・量産終了の機種も表示（${window._fpFinishedN||0}機種・完了扱い）</label>`;
+}
 /* ⚽ ボール位置ボード: 部署の列に機種カード */
 function _fpBoardHtml(rows){
   const t=_fpTerm.trim().toLowerCase();
@@ -256,7 +266,7 @@ function _fpBoardHtml(rows){
     </div>`;};
   return `<div class="pt-bar"><input id="fp-q" class="pt-in" style="flex:1;min-width:200px;" placeholder="機種・タイトルで検索..." value="${_e11(_fpTerm)}"
       oninput="clearTimeout(window._fpT);window._fpT=setTimeout(()=>{_fpTerm=this.value;renderFlowPage();const el=document.getElementById('fp-q');el.focus();el.setSelectionRange(el.value.length,el.value.length);},250)">
-    <span class="pt-muted">段階: ${FLOW_PHASE}</span></div>
+    <span class="pt-muted">段階: ${FLOW_PHASE}</span>${_fpFinishedToggle()}</div>
     <div class="pt-info">各機種のボールが今どの部署にあるか（${items.length}機種）。カードを別の部署へドラッグするとボールを移動できます。カードをクリックでその機種のフロー表、「詳細を開く」で工程の書類・メール等。日数はボールが今の工程に来てからの日数。</div>
     <div class="fp-board">${FLOW_LANES.map((l,i)=>`<div class="fp-col${i===1?' me':''}" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')"
         ondrop="event.preventDefault();this.classList.remove('over');_fpDropToLane(event.dataTransfer.getData('text'),${i})">
@@ -280,7 +290,7 @@ function _fpProgressHtml(rows){
   const ov=rows.map(r=>{const s=_fpSummary(r.key);const v=r.db||{};return {r,s,title:v.title||'',sales:v.salesDate||(v.longlead||{}).deliveryDate||''};})
     .sort((a,b)=>(!!b.r.m-!!a.r.m)||String(a.sales||'9999').localeCompare(String(b.sales||'9999')));
   const bar=p=>`<div style="display:flex;align-items:center;gap:6px;"><div style="flex:1;min-width:80px;height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;"><div style="width:${p}%;height:100%;background:${p>=100?'#16a34a':'#2563eb'};"></div></div><b style="font-size:11px;">${p}%</b></div>`;
-  return `<div class="pt-wrap" style="max-height:220px;"><table class="pt"><thead><tr><th>機種</th><th>タイトル</th><th class="pt-cur">販売時期</th><th style="min-width:140px;">進捗</th><th>完了</th><th>⚽ ボールのある工程</th><th>部署</th><th>日数</th></tr></thead><tbody>
+  return `<div class="pt-bar">${_fpFinishedToggle()}</div><div class="pt-wrap" style="max-height:220px;"><table class="pt"><thead><tr><th>機種</th><th>タイトル</th><th class="pt-cur">販売時期</th><th style="min-width:140px;">進捗</th><th>完了</th><th>⚽ ボールのある工程</th><th>部署</th><th>日数</th></tr></thead><tbody>
     ${ov.map(o=>{const b=o.s.ball;return `<tr class="click" style="${o.r.key===_fpSel?'outline:2px solid #2563eb;outline-offset:-2px;':''}" onclick="_fpSel='${_e11(o.r.key)}';renderFlowPage()">
       <td class="name">${_e11(_dispKey(o.r.key))}${o.r.m?'<span class="pt-tag">登録</span>':''}</td><td class="spec">${_e11(o.title)}</td>
       <td class="c pt-cur">${_e11(o.sales||'—')}</td><td>${bar(o.s.pct)}</td><td class="num">${o.s.done} / ${o.s.total}</td>

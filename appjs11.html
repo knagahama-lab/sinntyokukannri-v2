@@ -1,9 +1,13 @@
 <script>
 /* ============================================================
    業務フロー進捗（自社の業務フロー「業務フロー作成260701」より）
-   段階「機種開発～量産準備」の全部署・全工程(43工程)を機種ごとにチェックする。
-   画面は業務フロー図と同じ「部署の列 × 工程の順番」の表。
-   ・各工程: 完了チェック・完了日・担当・メモ（state.flowProgress[機種キー][工程ID]）
+   段階「機種開発～量産準備」の全部署・全工程(43工程)を機種ごとに管理する。
+   ・⚽ ボール位置ボード: 部署の列に機種カードを置き、今どの部署・工程にボールがあるかを1画面で表示
+     ボール = 手動で指定した工程（__ball）、無ければ未完了の最初の工程。カードのドラッグで移動
+   ・フロー表: 業務フロー図と同じ「部署の列 × 工程の順番」の表で完了チェック
+   ・工程の詳細: 状態・担当・予定日／保存先／関連リンク／添付書類／メール内容／メモ／履歴を一括管理
+     完了状態など小さなデータ → state.flowProgress[機種][工程]
+     リンク・添付・メール・履歴 → Drive「営業進捗管理_業務フロー記録.json」(loadStore/saveStore)
    ・既存データとの連動（記録が無い場合の自動判定）:
        サブFIX ← HW構成一覧表のサブFIX日 / 申請 ← HW構成一覧表の申請日
        長納期部品の生産計画情報 ← 長納期計画PDFの取込 / 仮の構成表 ← 構成表(量産準備用)の取得
@@ -13,7 +17,7 @@ const FLOW_LANES=['客先・イベント','営業','設計・ハード','生産�
 const FLOW_PHASE='機種開発～量産準備';
 const FLOW_DEV=[{"id": "d01", "row": 1, "lane": -1, "span": [3, 4], "label": "量産設備見積フォロー"}, {"id": "d02", "row": 2, "lane": 2, "span": null, "label": "量産設備見積依頼"}, {"id": "d03", "row": 2, "lane": 3, "span": null, "label": "実装見積依頼"}, {"id": "d04", "row": 2, "lane": 7, "span": null, "label": "見積書作成　実装・ICT・O/S・　金型・組立"}, {"id": "d05", "row": 3, "lane": 0, "span": null, "label": "量産設備見積確認"}, {"id": "d06", "row": 3, "lane": 1, "span": null, "label": "量産設備見積・提出"}, {"id": "d07", "row": 3, "lane": 2, "span": null, "label": "量産設備見積照査・展開"}, {"id": "d08", "row": 3, "lane": 3, "span": null, "label": "実装見積照査"}, {"id": "d09", "row": 3, "lane": 4, "span": null, "label": "見積書番号　ナンバリング"}, {"id": "d10", "row": 4, "lane": 3, "span": null, "label": "QC・作業標準書　作成依頼"}, {"id": "d11", "row": 4, "lane": 7, "span": null, "label": "QC・作業標準書　作成"}, {"id": "d12", "row": 5, "lane": 0, "span": null, "label": "量産設備発注"}, {"id": "d13", "row": 5, "lane": 4, "span": null, "label": "量産設備発注"}, {"id": "d14", "row": 6, "lane": 0, "span": null, "label": "サブFIX　機種評価依頼"}, {"id": "d15", "row": 6, "lane": 2, "span": null, "label": "工数算出　保守"}, {"id": "d16", "row": 7, "lane": 0, "span": null, "label": "パネル貸し出し"}, {"id": "d17", "row": 7, "lane": 2, "span": null, "label": "受取　機種評価実施"}, {"id": "d18", "row": 8, "lane": 0, "span": null, "label": "信頼性試験結果報告書　作成・回覧"}, {"id": "d19", "row": 8, "lane": 2, "span": null, "label": "信頼性試験結果報告書　作成・回覧"}, {"id": "d20", "row": 9, "lane": 0, "span": null, "label": "サブFIX"}, {"id": "d21", "row": 9, "lane": 3, "span": null, "label": "量産検査ライブラリ"}, {"id": "d22", "row": 9, "lane": 5, "span": null, "label": "量産検査ライブラリ"}, {"id": "d23", "row": 10, "lane": -1, "span": [1, 4], "label": "商品説明会"}, {"id": "d24", "row": 11, "lane": -1, "span": [1, 4], "label": "(仕様DR)設計DR"}, {"id": "d25", "row": 12, "lane": -1, "span": [1, 5], "label": "試作DR(ソフトは社内開発している場合、していない場合は参加不要)"}, {"id": "d26", "row": 13, "lane": 0, "span": null, "label": "申請"}, {"id": "d27", "row": 13, "lane": 3, "span": null, "label": "実装費見積依頼"}, {"id": "d28", "row": 13, "lane": 7, "span": null, "label": "実装費見積"}, {"id": "d29", "row": 14, "lane": 2, "span": null, "label": "1B部品表作成　製造変更承認書　1B登録"}, {"id": "d30", "row": 14, "lane": 3, "span": null, "label": "確認"}, {"id": "d31", "row": 14, "lane": 4, "span": null, "label": "確認　オペレート"}, {"id": "d32", "row": 15, "lane": 0, "span": null, "label": "長納期部品の調達活動用　生産計画情報"}, {"id": "d33", "row": 15, "lane": 4, "span": null, "label": "長納期手配指示書作成　1B/単品部品対象"}, {"id": "d34", "row": 16, "lane": 0, "span": null, "label": "確認・押印"}, {"id": "d35", "row": 16, "lane": 1, "span": null, "label": "関係者に配信　長納期手配指示書提出"}, {"id": "d36", "row": 17, "lane": 1, "span": null, "label": "保管"}, {"id": "d37", "row": 18, "lane": 0, "span": null, "label": "①部品表示変更確認　②量産設備係る検収確認　③生産地確認　④構成確認　⑤L/T確認表　⑥量産見積り　仮の構成表"}, {"id": "d38", "row": 18, "lane": 1, "span": null, "label": "作成　①②④⑤⑥　仮構成表展開"}, {"id": "d39", "row": 18, "lane": 3, "span": null, "label": "見積依頼・取得"}, {"id": "d40", "row": 18, "lane": 4, "span": null, "label": "作成　③"}, {"id": "d41", "row": 18, "lane": 7, "span": null, "label": "見積発行"}, {"id": "d42", "row": 19, "lane": 0, "span": null, "label": "確認・押印"}, {"id": "d43", "row": 19, "lane": 1, "span": null, "label": "確認・提出　①②③④⑤⑥"}];
 if(!state.flowProgress)state.flowProgress={};
-let _fpSel='', _fpTab='progress', _fpOpenOnly=false, _fpLane='';
+let _fpSel='', _fpTab='ball', _fpOpenOnly=false, _fpLane='', _fpTerm='';
 function _e11(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function _fpDate(s){
   const m=String(s||'').match(/^(\d{2,4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
@@ -21,7 +25,28 @@ function _fpDate(s){
   const y=m[1].length===2?'20'+m[1]:m[1];
   return `${y}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
 }
-// 既存データからの自動判定
+function _fpDays(d){if(!d)return '';const n=Math.floor((new Date(_todayStr())-new Date(d))/86400000);return n>=0?n:'';}
+
+/* ---------- 記録（リンク・添付・メール・履歴）: Drive JSON ---------- */
+const FD_STORE='業務フロー記録';
+let _fd={}, _fdLoaded=false, _fdLoading=false;
+function _fdLoad(cb){
+  if(_fdLoaded){cb&&cb();return;}
+  if(typeof google==='undefined'||!google.script){_fdLoaded=true;cb&&cb();return;}
+  if(_fdLoading)return;_fdLoading=true;
+  google.script.run.withSuccessHandler(res=>{try{const o=JSON.parse(res||'{}');if(!o.__error)_fd=o.docs||{};}catch(e){}_fdLoaded=true;_fdLoading=false;cb&&cb();})
+    .withFailureHandler(()=>{_fdLoaded=true;_fdLoading=false;cb&&cb();}).loadStore(FD_STORE);
+}
+function _fdSave(){
+  if(typeof google==='undefined'||!google.script)return;
+  google.script.run.withSuccessHandler(res=>{try{const r=JSON.parse(res);if(!r.success)showToast('⚠️ 記録の保存に失敗: '+r.error,6000);}catch(e){}})
+    .withFailureHandler(err=>showToast('⚠️ 記録の保存に失敗: '+err.message,6000)).saveStore(FD_STORE,JSON.stringify({docs:_fd}));
+}
+function _fdRec(key,id){const m=_fd[key]=_fd[key]||{};return m[id]=m[id]||{folder:'',links:[],files:[],mails:[],log:[]};}
+function _fdPeek(key,id){return ((_fd[key]||{})[id])||{};}
+function _fdLog(key,id,text){const r=_fdRec(key,id);r.log.unshift({at:new Date().toISOString().slice(0,16).replace('T',' '),text});if(r.log.length>100)r.log.length=100;}
+
+/* ---------- 状態・自動判定・ボール ---------- */
 function _fpAuto(key,id){
   const v=_mdbView(key)||{};const hw=v.hw||{};const t=_todayStr();
   if(id==='d20'){const d=_fpDate(hw.subFixDate);if(d&&d<=t)return {date:d,src:'HW構成一覧表のサブFIX日'};}
@@ -34,83 +59,250 @@ function _fpStep(key,id){
   const rec=((state.flowProgress[key]||{})[id])||null;
   if(rec&&rec.done!==undefined)return Object.assign({auto:false},rec);
   const a=_fpAuto(key,id);
-  if(a)return {done:true,date:a.date,owner:'',note:'',auto:true,src:a.src};
+  if(a)return Object.assign({done:true,date:a.date,owner:'',note:'',auto:true,src:a.src},rec||{},{done:true});
   return Object.assign({done:false,date:'',owner:'',note:'',auto:false},rec||{});
 }
-function _fpSummary(key){
-  let done=0;let next=null;
-  FLOW_DEV.forEach(s=>{const st=_fpStep(key,s.id);if(st.done)done++;else if(!next)next=s;});
-  return {done,total:FLOW_DEV.length,pct:Math.round(done/FLOW_DEV.length*100),next};
+function _fpBall(key){
+  const r=state.flowProgress[key]||{};
+  if(r.__ball){const s=FLOW_DEV.find(x=>x.id===r.__ball);if(s)return {step:s,manual:true,since:r.__ballAt||''};}
+  const s=FLOW_DEV.find(x=>!_fpStep(key,x.id).done);
+  return {step:s||null,manual:false,since:(r.__ballId===(s&&s.id))?(r.__ballAt||''):''};
 }
+// 自動のボール位置が変わったら到着日を記録（滞留日数の計算用）
+function _fpTrackBall(key){
+  const r=state.flowProgress[key]=state.flowProgress[key]||{};
+  const b=_fpBall(key);const id=b.step?b.step.id:'__done';
+  if(r.__ballId!==id){r.__ballId=id;r.__ballAt=_todayStr();return true;}
+  return false;
+}
+function _fpSummary(key){
+  let done=0;FLOW_DEV.forEach(s=>{if(_fpStep(key,s.id).done)done++;});
+  const b=_fpBall(key);
+  return {done,total:FLOW_DEV.length,pct:Math.round(done/FLOW_DEV.length*100),next:b.step,ball:b};
+}
+function _fpLaneIdx(s){return s.span?s.span[0]:s.lane;}
 function _fpLaneName(s){return s.span?FLOW_LANES.slice(s.span[0],s.span[1]+1).map(x=>x.replace(/・.*$/,'')).join('・')+'（合同）':FLOW_LANES[s.lane];}
 
+function _fpSetBall(key,id,silent){
+  const r=state.flowProgress[key]=state.flowProgress[key]||{};
+  const s=FLOW_DEV.find(x=>x.id===id);
+  if(id){r.__ball=id;r.__ballId=id;r.__ballAt=_todayStr();}else{delete r.__ball;_fpTrackBall(key);}
+  _fdLog(key,id||'__ball',id?`⚽ ボールを「${s.label}」（${_fpLaneName(s)}）へ移動`:'⚽ ボールを自動（未完了の最初の工程）に戻す');_fdSave();
+  addLog(`⚽ ${_dispKey(key)}: ボール → ${id?_fpLaneName(s)+'／'+s.label.slice(0,20):'自動'}`);
+  saveToGAS();
+  if(!silent){showToast(`⚽ ${_dispKey(key)} のボール: ${id?_fpLaneName(s)+' ／ '+s.label.slice(0,24):'自動'}`);renderFlowPage();}
+}
 function _fpToggle(key,id,done){
   const r=state.flowProgress[key]=state.flowProgress[key]||{};
   const cur=r[id]||{};
-  r[id]=Object.assign({},cur,{done,date:done?(cur.date||_todayStr()):'',by:(typeof _currentUserEmail!=='undefined'?_currentUserEmail:'')});
+  r[id]=Object.assign({},cur,{done,date:done?(cur.date||_todayStr()):''});
+  // 手動ボールの工程が完了したら自動に戻す
+  if(done&&r.__ball===id)delete r.__ball;
+  _fpTrackBall(key);
   const s=FLOW_DEV.find(x=>x.id===id);
+  _fdLog(key,id,done?'✅ 完了':'↩ 未完了に戻す');_fdSave();
   addLog(`📈 業務フロー ${_dispKey(key)}: ${s?s.label.slice(0,20):id} ${done?'完了':'未完了に戻す'}`);
   saveToGAS();
-  const w=document.querySelector('#fp-detail .pt-wrap');const st=w?w.scrollTop:0;
+  const w=document.querySelector('#fp-wrap');const st=w?w.scrollTop:0;
   renderFlowPage();
-  const w2=document.querySelector('#fp-detail .pt-wrap');if(w2)w2.scrollTop=st;
+  const w2=document.querySelector('#fp-wrap');if(w2)w2.scrollTop=st;
 }
-function _fpEdit(key,id){
-  const s=FLOW_DEV.find(x=>x.id===id);const st=_fpStep(key,id);
-  _overlay('fp-edit',`📈 ${_e11(_dispKey(key))} — ${_e11(s.label)}`,`
-    <div class="pt-info">部署: ${_e11(_fpLaneName(s))}　／　順番: ${s.row}${st.auto?`　／　自動判定: ${_e11(st.src)}`:''}</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-      <label class="me-f">状態<select id="fpe-done" class="me-in"><option value="1"${st.done?' selected':''}>完了</option><option value="0"${!st.done?' selected':''}>未完了</option></select></label>
-      <label class="me-f">完了日<input id="fpe-date" type="date" class="me-in" value="${_e11(st.date||'')}"></label>
-      <label class="me-f">担当<input id="fpe-owner" class="me-in" value="${_e11(st.owner||'')}"></label>
-      <label class="me-f">予定日<input id="fpe-plan" type="date" class="me-in" value="${_e11(st.plan||'')}"></label>
+
+/* ---------- 工程の詳細画面（一括管理） ---------- */
+function openStepDetail(key,id){
+  if(!_fdLoaded){_fdLoad(()=>openStepDetail(key,id));return;}
+  const s=FLOW_DEV.find(x=>x.id===id);const st=_fpStep(key,id);const d=_fdPeek(key,id);const b=_fpBall(key);
+  const v=_mdbView(key)||{};
+  const isBall=b.step&&b.step.id===id;
+  const sys=[];
+  if(st.auto)sys.push('自動判定: '+st.src);
+  if(id==='d37'||/構成表/.test(s.label)){const r=((state.configSheets[key]||{}).prep)||{};sys.push(`構成表（量産準備用）: ${r.got?'取得済 '+r.got:r.req?'依頼済 '+r.req:'未依頼'}${r.url?` <a class="q" href="${_e11(r.url)}" target="_blank" rel="noopener">開く</a>`:''}`);}
+  if(id==='d32'||/長納期/.test(s.label)){const ll=v.longlead||{};sys.push(`長納期計画: ${ll.deliveryDate?'納品 '+ll.deliveryDate+'（'+(ll.timing||'')+'）':'未取込'}${ll.qty?' ／ 台数 '+ll.qty:''}${ll.frame?' ／ 枠 '+ll.frame:''}`);}
+  if(/サブFIX|申請/.test(s.label)){const hw=v.hw||{};sys.push(`HW構成一覧表: サブFIX ${hw.subFixDate||'—'} ／ 申請日 ${hw.applyDate||'—'}`);}
+  const list=(arr,render,del)=>arr&&arr.length?arr.map((x,i)=>`<div style="display:flex;gap:6px;align-items:flex-start;padding:4px 0;border-bottom:1px solid var(--border-light);">${render(x)}<span style="flex:1;"></span><a href="#" class="q" style="font-size:11px;" onclick="event.preventDefault();${del}(${i})">削除</a></div>`).join(''):'<div class="pt-muted">なし</div>';
+  window._sdKey=key;window._sdId=id;
+  _overlay('step-detail',`📋 ${_e11(_dispKey(key))} ${_e11(v.title||'')} — ${_e11(s.label)}`,`
+    <div class="pt-bar" style="margin-bottom:6px;">
+      <span class="pt-tag">${FLOW_PHASE}</span><span class="pt-tag">${_e11(_fpLaneName(s))}</span><span class="pt-tag">順番 ${s.row}</span>
+      ${isBall?`<span class="st st-yellow">⚽ 今ボールはこの工程${b.since?'（'+_fpDays(b.since)+'日目）':''}</span>`:`<button class="btn btn-sm" onclick="_fpSetBall('${_e11(key)}','${id}',true);document.getElementById('step-detail').remove();renderFlowPage();">⚽ ボールをこの工程へ</button>`}
     </div>
-    <label class="me-f" style="margin-top:10px;">メモ<textarea id="fpe-note" class="me-in" rows="3">${_e11(st.note||'')}</textarea></label>
-    <div style="display:flex;gap:6px;margin-top:12px;">
-      <button class="btn btn-sm" onclick="_fpClear('${_e11(key)}','${id}')">記録を消す（自動判定に戻す）</button><span style="flex:1;"></span>
-      <button class="btn btn-primary btn-sm" onclick="_fpSaveEdit('${_e11(key)}','${id}')">保存</button></div>`,560);
+    ${sys.length?`<div class="pt-info" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:6px 10px;">${sys.join('<br>')}</div>`:''}
+    <div class="me-h">■ 状態</div>
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px 10px;">
+      <label class="me-f">状態<select id="sd-done" class="me-in"><option value="1"${st.done?' selected':''}>完了</option><option value="0"${!st.done?' selected':''}>未完了</option></select></label>
+      <label class="me-f">完了日<input id="sd-date" type="date" class="me-in" value="${_e11(st.date||'')}"></label>
+      <label class="me-f">予定日<input id="sd-plan" type="date" class="me-in" value="${_e11(st.plan||'')}"></label>
+      <label class="me-f">担当<input id="sd-owner" class="me-in" value="${_e11(st.owner||'')}"></label>
+    </div>
+    <div class="me-h">■ 保存先・関連リンク</div>
+    <label class="me-f">保存先（Driveフォルダのリンク、共有フォルダのパス など）<input id="sd-folder" class="me-in" value="${_e11(d.folder||'')}" placeholder="例: \\\\halo\\ac-work\\... または Driveのフォルダ"></label>
+    ${d.folder&&/^https?:/.test(d.folder)?`<a class="q" href="${_e11(d.folder)}" target="_blank" rel="noopener" style="font-size:12px;">📂 保存先を開く</a>`:''}
+    <div style="margin-top:8px;">${list(d.links,x=>`<a class="q" href="${_e11(x.url)}" target="_blank" rel="noopener">🔗 ${_e11(x.label||x.url)}</a>`,'_sdDelLink')}</div>
+    <div style="display:flex;gap:6px;margin-top:6px;"><input id="sd-link-label" class="me-in" style="flex:1;" placeholder="リンク名（例: 量産設備見積書）"><input id="sd-link-url" class="me-in" style="flex:2;" placeholder="URL"><button class="btn btn-sm" onclick="_sdAddLink()">追加</button></div>
+    <div class="me-h">■ 書類（Driveに保存）</div>
+    <div>${list(d.files,x=>`<a class="q" href="${_e11(x.url)}" target="_blank" rel="noopener">📄 ${_e11(x.name)}</a> <span class="pt-muted">${_e11(x.at||'')}</span>`,'_sdDelFile')}</div>
+    <label class="btn btn-sm" style="cursor:pointer;margin-top:6px;">＋ 書類をアップロード<input type="file" multiple style="display:none" onchange="_sdUpload(event)"></label>
+    <div class="me-h">■ メール</div>
+    <div>${list(d.mails,x=>`<details style="flex:1;"><summary style="cursor:pointer;font-size:12px;"><b>${_e11(x.subject||'（件名なし）')}</b> <span class="pt-muted">${_e11(x.from||'')} ${_e11(x.date||'')}</span></summary><pre style="white-space:pre-wrap;font-family:inherit;font-size:12px;background:#f8fafc;padding:8px;border-radius:6px;max-height:240px;overflow:auto;">${_e11(x.body||'')}</pre></details>`,'_sdDelMail')}</div>
+    <textarea id="sd-mail" class="me-in" rows="4" style="margin-top:6px;" placeholder="メール本文を貼り付け（件名・差出人・日付の行があれば自動で読み取ります）"></textarea>
+    <div style="display:flex;gap:6px;margin-top:6px;"><input id="sd-mail-subject" class="me-in" placeholder="件名（空なら自動）"><input id="sd-mail-from" class="me-in" placeholder="差出人"><input id="sd-mail-date" type="date" class="me-in" style="max-width:150px;"><button class="btn btn-sm" onclick="_sdAddMail()">メールを保存</button></div>
+    <div class="me-h">■ メモ</div>
+    <textarea id="sd-note" class="me-in" rows="3">${_e11(st.note||'')}</textarea>
+    <div class="me-h">■ 履歴</div>
+    <div style="max-height:140px;overflow:auto;font-size:11.5px;">${(d.log||[]).map(l=>`<div><span class="pt-muted">${_e11(l.at)}</span> ${_e11(l.text)}</div>`).join('')||'<div class="pt-muted">なし</div>'}</div>
+    <div style="display:flex;gap:6px;margin-top:14px;">
+      <button class="btn btn-sm" onclick="_fpClear('${_e11(key)}','${id}')">状態の記録を消す（自動判定に戻す）</button><span style="flex:1;"></span>
+      <button class="btn btn-sm" onclick="document.getElementById('step-detail').remove()">閉じる</button>
+      <button class="btn btn-primary btn-sm" onclick="_sdSave()">💾 保存</button></div>`,820);
 }
-function _fpSaveEdit(key,id){
-  const g=x=>document.getElementById('fpe-'+x).value;
+function _sdReopen(){const k=window._sdKey,i=window._sdId;const ov=document.getElementById('step-detail');if(ov)ov.remove();openStepDetail(k,i);}
+function _sdAddLink(){
+  const label=document.getElementById('sd-link-label').value.trim(),url=document.getElementById('sd-link-url').value.trim();
+  if(!url){showToast('⚠️ URLを入力してください');return;}
+  const r=_fdRec(window._sdKey,window._sdId);r.links.push({label,url});_fdLog(window._sdKey,window._sdId,'🔗 リンク追加: '+(label||url));_fdSave();_sdReopen();
+}
+function _sdDelLink(i){const r=_fdRec(window._sdKey,window._sdId);const x=r.links.splice(i,1)[0];_fdLog(window._sdKey,window._sdId,'🔗 リンク削除: '+(x&&(x.label||x.url)));_fdSave();_sdReopen();}
+function _sdDelFile(i){if(!confirm('一覧から外しますか？（Driveのファイルは残ります）'))return;const r=_fdRec(window._sdKey,window._sdId);const x=r.files.splice(i,1)[0];_fdLog(window._sdKey,window._sdId,'📄 書類を一覧から外す: '+(x&&x.name));_fdSave();_sdReopen();}
+function _sdDelMail(i){if(!confirm('このメールを削除しますか？'))return;const r=_fdRec(window._sdKey,window._sdId);r.mails.splice(i,1);_fdSave();_sdReopen();}
+function _sdUpload(ev){
+  const files=Array.from(ev.target.files||[]);ev.target.value='';
+  const key=window._sdKey,id=window._sdId;const cat='業務フロー_'+_dispKey(key);
+  const cust=_keyCust(key);
+  files.forEach(f=>{
+    if(f.size>40*1024*1024){showToast('⚠️ 40MBを超えるファイルは保存できません');return;}
+    showToast('📤 アップロード中: '+f.name);
+    const rd=new FileReader();
+    rd.onload=e=>{
+      google.script.run.withSuccessHandler(res=>{
+        const r=JSON.parse(res);
+        if(!r.success){showToast('⚠️ '+r.error,6000);return;}
+        const rec=_fdRec(key,id);rec.files.push({name:r.fileName,url:r.url,fileId:r.fileId,at:r.uploadedAt});
+        if(!rec.folder&&r.folderUrl)rec.folder=r.folderUrl;
+        _fdLog(key,id,'📄 書類を保存: '+r.fileName);_fdSave();showToast('✅ 保存しました: '+r.fileName);
+        if(document.getElementById('step-detail'))_sdReopen();
+      }).withFailureHandler(err=>showToast('⚠️ '+err.message,6000))
+        .archiveImportFile(f.name,e.target.result.split(',')[1],f.type||'application/octet-stream',cat,cust==='fuji'?'':_custName(cust));
+    };
+    rd.readAsDataURL(f);
+  });
+}
+// メール本文から件名・差出人・日付を読み取る
+function _sdParseMail(t){
+  const g=re=>{const m=t.match(re);return m?m[1].trim():'';};
+  const subject=g(/^(?:件名|Subject)\s*[:：]\s*(.+)$/m);
+  const from=g(/^(?:差出人|送信者|From)\s*[:：]\s*(.+)$/m);
+  const dateRaw=g(/^(?:日付|送信日時|Date|Sent)\s*[:：]\s*(.+)$/m);
+  let date='';const dm=dateRaw.match(/(\d{4})[年\/\-.](\d{1,2})[月\/\-.](\d{1,2})/);
+  if(dm)date=`${dm[1]}-${dm[2].padStart(2,'0')}-${dm[3].padStart(2,'0')}`;
+  return {subject,from,date};
+}
+function _sdAddMail(){
+  const body=document.getElementById('sd-mail').value;
+  if(!body.trim()){showToast('⚠️ メール本文を貼り付けてください');return;}
+  const p=_sdParseMail(body);
+  const subject=document.getElementById('sd-mail-subject').value.trim()||p.subject||body.trim().split(/\r?\n/)[0].slice(0,60);
+  const from=document.getElementById('sd-mail-from').value.trim()||p.from;
+  const date=document.getElementById('sd-mail-date').value||p.date||_todayStr();
+  const r=_fdRec(window._sdKey,window._sdId);r.mails.unshift({subject,from,date,body,savedAt:_todayStr()});
+  _fdLog(window._sdKey,window._sdId,'✉️ メール保存: '+subject);_fdSave();showToast('✅ メールを保存しました');_sdReopen();
+}
+function _sdSave(){
+  const key=window._sdKey,id=window._sdId;const g=x=>document.getElementById('sd-'+x).value;
   const r=state.flowProgress[key]=state.flowProgress[key]||{};
-  const done=g('done')==='1';
-  r[id]={done,date:done?(g('date')||_todayStr()):g('date'),owner:g('owner').trim(),plan:g('plan'),note:g('note')};
-  saveToGAS();document.getElementById('fp-edit').remove();renderFlowPage();
+  const done=g('done')==='1';const prev=_fpStep(key,id);
+  r[id]=Object.assign({},r[id]||{},{done,date:done?(g('date')||_todayStr()):g('date'),plan:g('plan'),owner:g('owner').trim(),note:g('note')});
+  if(done&&r.__ball===id)delete r.__ball;
+  _fpTrackBall(key);
+  const rec=_fdRec(key,id);const folder=g('folder').trim();
+  if(folder!==(rec.folder||''))_fdLog(key,id,'📂 保存先: '+folder);
+  rec.folder=folder;
+  if(prev.done!==done)_fdLog(key,id,done?'✅ 完了':'↩ 未完了に戻す');
+  _fdSave();saveToGAS();
+  document.getElementById('step-detail').remove();showToast('✅ 保存しました');renderFlowPage();
 }
-function _fpClear(key,id){const r=state.flowProgress[key];if(r)delete r[id];saveToGAS();document.getElementById('fp-edit').remove();renderFlowPage();}
+function _fpClear(key,id){
+  const r=state.flowProgress[key];if(r)delete r[id];_fpTrackBall(key);saveToGAS();
+  const ov=document.getElementById('step-detail');if(ov)ov.remove();renderFlowPage();
+}
 
 /* ---------- 画面 ---------- */
 function renderFlowPage(){
-  const tabs=`<div class="pt-bar">${[['progress','📈 業務フロー進捗（'+FLOW_PHASE+'）'],['vendor','🔧 委託先フロー（従来）']].map(([k,l])=>`<button class="pt-chip${_fpTab===k?' on':''}" onclick="_fpTab='${k}';renderFlowPage()">${l}</button>`).join('')}</div>`;
-  if(_fpTab==='vendor'){renderFlow();const el=document.getElementById('page-flow');el.insertAdjacentHTML('afterbegin',tabs);return;}
+  const tabs=`<div class="pt-bar">${[['ball','⚽ ボール位置（全機種）'],['progress','📈 フロー表（機種別）'],['vendor','🔧 委託先フロー（従来）']].map(([k,l])=>`<button class="pt-chip${_fpTab===k?' on':''}" onclick="_fpTab='${k}';renderFlowPage()">${l}</button>`).join('')}</div>`;
+  if(_fpTab==='vendor'){renderFlow();document.getElementById('page-flow').insertAdjacentHTML('afterbegin',tabs);return;}
   if(!_mdbLoadStarted&&typeof _loadModelDB==='function')_loadModelDB();
+  if(!_fdLoaded)_fdLoad(()=>{if(currentPage==='flow')renderFlowPage();});
   const rows=_modelRows('active');
+  let moved=false;rows.forEach(r=>{if(_fpTrackBall(r.key))moved=true;});
+  if(moved){clearTimeout(window._fpSaveT);window._fpSaveT=setTimeout(()=>saveToGAS(),1000);}
   if(!_fpSel||!rows.some(r=>r.key===_fpSel))_fpSel=(rows.find(r=>r.m)||rows[0]||{}).key||'';
+  document.getElementById('page-flow').innerHTML=tabs+(_fpTab==='ball'?_fpBoardHtml(rows):_fpProgressHtml(rows));
+}
+
+/* ⚽ ボール位置ボード: 部署の列に機種カード */
+function _fpBoardHtml(rows){
+  const t=_fpTerm.trim().toLowerCase();
+  const items=rows.map(r=>{const s=_fpSummary(r.key);const v=r.db||{};return {r,s,title:v.title||'',sales:v.salesDate||(v.longlead||{}).deliveryDate||''};})
+    .filter(o=>!t||(o.r.key+' '+o.title).toLowerCase().includes(t));
+  const col=i=>items.filter(o=>o.s.ball.step&&_fpLaneIdx(o.s.ball.step)===i);
+  const doneItems=items.filter(o=>!o.s.ball.step);
+  const card=o=>{const b=o.s.ball;const days=b.since?_fpDays(b.since):'';
+    return `<div class="fp-card" draggable="true" ondragstart="event.dataTransfer.setData('text','${_e11(o.r.key)}')" onclick="_fpSel='${_e11(o.r.key)}';_fpTab='progress';renderFlowPage()">
+      <div style="display:flex;justify-content:space-between;gap:4px;"><b>${_e11(_dispKey(o.r.key))}</b>${b.manual?'<span class="st st-yellow" style="padding:0 5px;font-size:10px;">手動</span>':''}</div>
+      <div class="pt-muted" style="font-size:10.5px;">${_e11(o.title)}${o.sales?' ／ '+_e11(o.sales):''}</div>
+      ${b.step?`<div style="font-size:11px;margin-top:3px;">⚽ ${_e11(b.step.label.slice(0,30))}</div>`:''}
+      <div style="display:flex;gap:4px;align-items:center;margin-top:4px;"><div style="flex:1;height:5px;background:#e2e8f0;border-radius:3px;overflow:hidden;"><div style="width:${o.s.pct}%;height:100%;background:#2563eb;"></div></div>
+        <span style="font-size:10px;">${o.s.done}/${o.s.total}</span>${days!==''?`<span class="pt-muted" style="font-size:10px;">${days}日</span>`:''}</div>
+      ${b.step?`<a href="#" class="q" style="font-size:10px;" onclick="event.preventDefault();event.stopPropagation();openStepDetail('${_e11(o.r.key)}','${b.step.id}')">詳細を開く</a>`:''}
+    </div>`;};
+  return `<div class="pt-bar"><input id="fp-q" class="pt-in" style="flex:1;min-width:200px;" placeholder="機種・タイトルで検索..." value="${_e11(_fpTerm)}"
+      oninput="clearTimeout(window._fpT);window._fpT=setTimeout(()=>{_fpTerm=this.value;renderFlowPage();const el=document.getElementById('fp-q');el.focus();el.setSelectionRange(el.value.length,el.value.length);},250)">
+    <span class="pt-muted">段階: ${FLOW_PHASE}</span></div>
+    <div class="pt-info">各機種のボールが今どの部署にあるか（${items.length}機種）。カードを別の部署へドラッグするとボールを移動できます。カードをクリックでその機種のフロー表、「詳細を開く」で工程の書類・メール等。日数はボールが今の工程に来てからの日数。</div>
+    <div class="fp-board">${FLOW_LANES.map((l,i)=>`<div class="fp-col${i===1?' me':''}" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')"
+        ondrop="event.preventDefault();this.classList.remove('over');_fpDropToLane(event.dataTransfer.getData('text'),${i})">
+        <div class="fp-col-h">${_e11(l)}<span>${col(i).length}</span></div>${col(i).map(card).join('')}</div>`).join('')}
+      <div class="fp-col"><div class="fp-col-h">✅ 完了<span>${doneItems.length}</span></div>${doneItems.map(card).join('')}</div></div>`;
+}
+// 部署の列へドロップ → その部署の工程を選んでボールを移動
+function _fpDropToLane(key,lane){
+  if(!key)return;
+  const steps=FLOW_DEV.filter(s=>s.span?(lane>=s.span[0]&&lane<=s.span[1]):s.lane===lane);
+  if(!steps.length){showToast('この部署には工程がありません');return;}
+  _overlay('fp-pick',`⚽ ${_e11(_dispKey(key))} のボールを「${_e11(FLOW_LANES[lane])}」へ`,`
+    <div class="pt-info">移動先の工程を選んでください（✅は完了済み）。</div>
+    ${steps.map(s=>{const st=_fpStep(key,s.id);return `<button class="btn btn-sm" style="display:block;width:100%;text-align:left;margin:4px 0;${st.done?'opacity:.6;':''}"
+      onclick="document.getElementById('fp-pick').remove();_fpSetBall('${_e11(key)}','${s.id}')">${st.done?'✅ ':'⬜ '}${s.row}. ${_e11(s.label)}</button>`;}).join('')}
+    <button class="btn btn-sm" style="margin-top:8px;" onclick="document.getElementById('fp-pick').remove();_fpSetBall('${_e11(key)}','')">自動（未完了の最初の工程）に戻す</button>`,560);
+}
+
+/* 📈 フロー表（機種別） */
+function _fpProgressHtml(rows){
   const ov=rows.map(r=>{const s=_fpSummary(r.key);const v=r.db||{};return {r,s,title:v.title||'',sales:v.salesDate||(v.longlead||{}).deliveryDate||''};})
     .sort((a,b)=>(!!b.r.m-!!a.r.m)||String(a.sales||'9999').localeCompare(String(b.sales||'9999')));
   const bar=p=>`<div style="display:flex;align-items:center;gap:6px;"><div style="flex:1;min-width:80px;height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden;"><div style="width:${p}%;height:100%;background:${p>=100?'#16a34a':'#2563eb'};"></div></div><b style="font-size:11px;">${p}%</b></div>`;
-  const ovHtml=`<div class="pt-wrap" style="max-height:260px;"><table class="pt"><thead><tr><th>機種</th><th>タイトル</th><th class="pt-cur">販売時期</th><th style="min-width:140px;">進捗</th><th>完了</th><th>次の工程</th><th>担当部署</th></tr></thead><tbody>
-    ${ov.map(o=>`<tr class="click" style="${o.r.key===_fpSel?'outline:2px solid #2563eb;outline-offset:-2px;':''}" onclick="_fpSel='${_e11(o.r.key)}';renderFlowPage()">
+  return `<div class="pt-wrap" style="max-height:220px;"><table class="pt"><thead><tr><th>機種</th><th>タイトル</th><th class="pt-cur">販売時期</th><th style="min-width:140px;">進捗</th><th>完了</th><th>⚽ ボールのある工程</th><th>部署</th><th>日数</th></tr></thead><tbody>
+    ${ov.map(o=>{const b=o.s.ball;return `<tr class="click" style="${o.r.key===_fpSel?'outline:2px solid #2563eb;outline-offset:-2px;':''}" onclick="_fpSel='${_e11(o.r.key)}';renderFlowPage()">
       <td class="name">${_e11(_dispKey(o.r.key))}${o.r.m?'<span class="pt-tag">登録</span>':''}</td><td class="spec">${_e11(o.title)}</td>
       <td class="c pt-cur">${_e11(o.sales||'—')}</td><td>${bar(o.s.pct)}</td><td class="num">${o.s.done} / ${o.s.total}</td>
-      <td class="spec" style="max-width:260px;">${o.s.next?_e11(o.s.next.label):'✅ 完了'}</td><td>${o.s.next?_e11(_fpLaneName(o.s.next)):''}</td></tr>`).join('')
-      ||'<tr><td colspan="7" class="c same" style="padding:16px;">機種がありません</td></tr>'}</tbody></table></div>`;
-  document.getElementById('page-flow').innerHTML=tabs+`
-    <div class="pt-info">自社の業務フロー（業務フロー作成260701）の「${FLOW_PHASE}」${FLOW_DEV.length}工程を機種ごとにチェックします。機種を選ぶと下にフロー表が出ます。</div>
-    ${ovHtml}<div id="fp-detail" style="margin-top:14px;">${_fpSel?_fpDetailHtml(_fpSel):''}</div>`;
+      <td class="spec" style="max-width:260px;">${b.step?_e11(b.step.label)+(b.manual?' <span class="st st-yellow" style="padding:0 4px;">手動</span>':''):'✅ 完了'}</td>
+      <td>${b.step?_e11(_fpLaneName(b.step)):''}</td><td class="num">${b.since?_fpDays(b.since):''}</td></tr>`;}).join('')
+      ||'<tr><td colspan="8" class="c same" style="padding:16px;">機種がありません</td></tr>'}</tbody></table></div>
+    <div id="fp-detail" style="margin-top:14px;">${_fpSel?_fpDetailHtml(_fpSel):''}</div>`;
 }
 function _fpDetailHtml(key){
-  const s=_fpSummary(key);const v=_mdbView(key)||{};
+  const s=_fpSummary(key);const v=_mdbView(key)||{};const ballId=s.ball.step?s.ball.step.id:'';
   const maxRow=Math.max(...FLOW_DEV.map(x=>x.row));
   const laneOn=i=>!_fpLane||String(i)===_fpLane;
-  const chip=st=>{
-    const x=FLOW_DEV.find(y=>y.id===st.id);const p=_fpStep(key,st.id);
+  const chip=x=>{
+    const p=_fpStep(key,x.id);const d=_fdPeek(key,x.id);
     if(_fpOpenOnly&&p.done)return '';
-    return `<div class="fp-step${p.done?' done':''}" title="${_e11((p.auto?'自動判定: '+p.src:'')+(p.note?' メモ: '+p.note:''))}">
-      <label style="display:flex;gap:5px;align-items:flex-start;cursor:pointer;"><input type="checkbox" ${p.done?'checked':''} onchange="_fpToggle('${_e11(key)}','${x.id}',this.checked)">
-        <span>${_e11(x.label)}</span></label>
+    const nDocs=(d.files||[]).length+(d.links||[]).length,nMail=(d.mails||[]).length;
+    return `<div class="fp-step${p.done?' done':''}${x.id===ballId?' ball':''}" title="${_e11((p.auto?'自動判定: '+p.src:'')+(p.note?' メモ: '+p.note:''))}">
+      <div style="display:flex;gap:5px;align-items:flex-start;"><input type="checkbox" ${p.done?'checked':''} onchange="_fpToggle('${_e11(key)}','${x.id}',this.checked)">
+        <a href="#" class="fp-lbl" onclick="event.preventDefault();openStepDetail('${_e11(key)}','${x.id}')">${x.id===ballId?'⚽ ':''}${_e11(x.label)}</a></div>
       <div class="fp-meta">${p.done?`<span class="st st-green" style="padding:0 5px;">${p.auto?'自動 ':''}${_e11(p.date||'完了')}</span>`:(p.plan?`<span class="st st-yellow" style="padding:0 5px;">予定 ${_e11(p.plan)}</span>`:'')}
-        ${p.owner?`<span class="pt-muted">${_e11(p.owner)}</span>`:''}<a href="#" class="q" style="font-size:10px;" onclick="event.preventDefault();_fpEdit('${_e11(key)}','${x.id}')">✎</a></div></div>`;
+        ${p.owner?`<span class="pt-muted">${_e11(p.owner)}</span>`:''}${nDocs?`<span class="pt-muted">📄${nDocs}</span>`:''}${nMail?`<span class="pt-muted">✉️${nMail}</span>`:''}
+        ${x.id!==ballId?`<a href="#" class="q" style="font-size:10px;" title="ボールをこの工程へ" onclick="event.preventDefault();_fpSetBall('${_e11(key)}','${x.id}')">⚽</a>`:''}</div></div>`;
   };
   let body=`<tr class="pt-sec"><td colspan="${FLOW_LANES.length+1}">■ ${FLOW_PHASE}（${s.done}/${s.total} 完了・${s.pct}%）</td></tr>`;
   for(let r=1;r<=maxRow;r++){
@@ -125,23 +317,24 @@ function _fpDetailHtml(key){
       const here=inRow.filter(x=>!x.span&&x.lane===i);
       cells+=`<td style="vertical-align:top;${laneOn(i)?'':'opacity:.25;'}">${here.map(chip).join('')}</td>`;
     }
-    body+=`<tr><td class="c pt-muted" style="width:28px;">${r}</td>${cells}</tr>`;
+    body+=`<tr><td class="c pt-muted">${r}</td>${cells}</tr>`;
   }
   return `<div class="pt-bar"><b style="font-size:14px;">${_e11(_dispKey(key))} ${_e11(v.title||'')}</b>
       <span class="st ${s.pct>=100?'st-green':'st-blue'}">${s.done}/${s.total} 完了（${s.pct}%）</span>
-      ${s.next?`<span class="pt-muted">次: ${_e11(s.next.label)}（${_e11(_fpLaneName(s.next))}）</span>`:''}
+      ${s.ball.step?`<span class="st st-yellow">⚽ ${_e11(_fpLaneName(s.ball.step))} ／ ${_e11(s.ball.step.label.slice(0,26))}${s.ball.manual?'（手動）':''}</span>`:''}
+      ${s.ball.manual?`<a href="#" class="q" style="font-size:11px;" onclick="event.preventDefault();_fpSetBall('${_e11(key)}','')">自動に戻す</a>`:''}
       <span style="flex:1;"></span>
       <select class="pt-in" onchange="_fpLane=this.value;renderFlowPage()"><option value="">全部署</option>${FLOW_LANES.map((l,i)=>`<option value="${i}"${_fpLane===String(i)?' selected':''}>${l}</option>`).join('')}</select>
       <label style="font-size:12px;display:flex;align-items:center;gap:4px;"><input type="checkbox" ${_fpOpenOnly?'checked':''} onchange="_fpOpenOnly=this.checked;renderFlowPage()"> 未完了のみ</label>
       <button class="btn btn-sm" onclick="openMachineEditor('${_e11(key)}')">✏️ 機種詳細</button>
       <button class="btn btn-sm" onclick="_ptPrint('業務フロー進捗 ${_e11(_dispKey(key))}','fp-wrap')">🖨 印刷</button></div>
-    <div class="pt-info">チェックで完了（今日の日付を記録）。✎で完了日・担当・予定日・メモ。「自動」はHW構成一覧表・長納期計画・構成表のデータから判定したもの。営業の列は黄色。</div>
+    <div class="pt-info">工程名クリックで詳細（保存先・書類・メール・メモ・履歴）。チェックで完了。⚽でボールをその工程へ。「自動」はHW構成一覧表・長納期計画・構成表から判定。営業の列は黄色。</div>
     <div class="pt-wrap" id="fp-wrap" style="max-height:calc(100vh - 220px);"><table class="pt fp-table"><thead><tr><th>順</th>${FLOW_LANES.map((l,i)=>`<th class="${i===1?'pt-cur':''}">${l}</th>`).join('')}</tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }
 // 機種詳細設定などに出す要約
 function _fpBadgeHtml(key){
   const s=_fpSummary(key);
-  return `<a href="#" class="q" onclick="event.preventDefault();const o=document.getElementById('machine-editor');if(o)o.remove();_fpSel='${_e11(key)}';_fpTab='progress';showPage('flow');">📈 業務フロー（${FLOW_PHASE}）: ${s.done}/${s.total} 完了（${s.pct}%）${s.next?'　次: '+_e11(s.next.label.slice(0,24)):''}</a>`;
+  return `<a href="#" class="q" onclick="event.preventDefault();const o=document.getElementById('machine-editor');if(o)o.remove();_fpSel='${_e11(key)}';_fpTab='progress';showPage('flow');">📈 業務フロー（${FLOW_PHASE}）: ${s.done}/${s.total} 完了（${s.pct}%）${s.ball.step?'　⚽ '+_e11(_fpLaneName(s.ball.step))+'／'+_e11(s.ball.step.label.slice(0,20)):''}</a>`;
 }
 </script>

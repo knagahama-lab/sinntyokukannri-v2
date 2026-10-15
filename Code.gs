@@ -1357,11 +1357,14 @@ function deleteFileFromDrive(fileId) {
  * @param {string} stateJson - JSON.stringify(state)
  * @param {string} changeDesc - 変更内容の説明
  */
-function sendAlertEmail(stateJson, changeDesc) {
+function sendAlertEmail(stateJson, changeDesc, machineId) {
   var state = _parseState(stateJson);
   if (!state) return;
   var email = _getNotifyEmail(state);
   if (!email) return;
+
+  // 変更対象の機種の得意先が通知OFFなら、変更通知は送らない（他のアラートは判定を続ける）
+  if (changeDesc && machineId && !_machineNotifyOn(state, machineId)) changeDesc = '';
 
   var alerts = _checkAlerts(state);
   // 変更内容があるか、アラートがある場合のみ送信
@@ -1501,7 +1504,25 @@ function _checkAlerts(state) {
     _checkMilestoneAlerts(state, alerts);
   }
 
-  return alerts;
+  // 得意先ごとの通知ON/OFF（OFFの得意先の機種はアラート対象外）
+  return alerts.filter(function(a){ return _machineNotifyOn(state, a.id); });
+}
+
+/** 機種の得意先ID（未設定=藤商事 'fuji'） */
+function _machineCustomerId(state, machineId) {
+  var ex = state.machineExtra && state.machineExtra[machineId];
+  return (ex && ex.customer) || 'fuji';
+}
+
+/** 得意先の通知が有効か（config.notifyCustomers[得意先ID] が false のときのみ無効。未設定=有効） */
+function _customerNotifyOn(state, custId) {
+  var nm = (state.config && state.config.notifyCustomers) || {};
+  return nm[custId] !== false;
+}
+
+/** 機種の得意先で通知が有効か */
+function _machineNotifyOn(state, machineId) {
+  return _customerNotifyOn(state, _machineCustomerId(state, machineId));
 }
 
 function _buildDailySummaryHtml(state) {

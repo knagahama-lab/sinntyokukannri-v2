@@ -831,6 +831,20 @@ function renderAdmin(){
           </div>
         </div>
 
+        <!-- 得意先ごとの通知 -->
+        <div style="margin-bottom:14px;">
+          <label style="font-size:12px;font-weight:700;display:block;margin-bottom:4px;">🏢 得意先ごとの通知（チェックを外すと、その得意先の機種はアラート・変更通知の対象外）</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+            ${_customers().map(c=>{
+              const on=!(state.config.notifyCustomers&&state.config.notifyCustomers[c.id]===false);
+              return`<label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg);border:1px solid var(--border-light);border-radius:6px;cursor:pointer;font-size:12px;">
+                <input type="checkbox" class="notify-cust-cb" data-cust="${_e8(c.id)}" ${on?'checked':''} style="width:15px;height:15px;">
+                ${_e8(c.name)}
+              </label>`;
+            }).join('')}
+          </div>
+        </div>
+
         <div class="form-row" style="margin-bottom:12px;">
           <div class="form-field">
             <label>エコ滞留警告 しきい値（台）</label>

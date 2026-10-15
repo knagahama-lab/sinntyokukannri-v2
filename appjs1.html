@@ -159,7 +159,7 @@ function tdDate(d,mId,fKey){
   return`<td class="mono center inline-editable" style="${style}" ${dblAttr}>${fmtD(d)} ${nearBadge(d)}</td>`;
 }
 
-function saveToGAS(alertDesc){
+function saveToGAS(alertDesc,alertMachineId){
   if(typeof google!=='undefined'&&google.script){
     // MACHINES配列の可変項目（量産台数・基板構成など）は保存対象外の
     // グローバル配列なので、保存の都度スナップショットして永続化する
@@ -190,7 +190,7 @@ function saveToGAS(alertDesc){
     });
     google.script.run.saveData(json);
     if(alertDesc && state.config.notifyEmail){
-      google.script.run.sendAlertEmail(json, alertDesc);
+      google.script.run.sendAlertEmail(json, alertDesc, alertMachineId||'');
     }
   }
 }
@@ -487,6 +487,10 @@ function saveNotifySettings(){
     milestone:document.getElementById('nc-milestone')?.checked!==false,
     statusChange:document.getElementById('nc-statuschange')?.checked!==false,
   };
+  // 得意先ごとの通知ON/OFF（OFFのものだけ false で保持。未設定=ON）
+  const nCust={};
+  document.querySelectorAll('.notify-cust-cb').forEach(cb=>{if(!cb.checked)nCust[cb.dataset.cust]=false;});
+  state.config.notifyCustomers=nCust;
   saveToGAS();
   const badge=document.getElementById('notify-status-badge');
   if(badge){
@@ -517,7 +521,7 @@ function sendTestEmail(){
   const validEmails=emails.filter(Boolean);
   if(!validEmails.length){showToast('⚠️ メールアドレスを先に保存してください');return;}
   if(typeof google==='undefined'||!google.script){showToast('⚠️ GAS上でのみ動作します');return;}
-  const json=JSON.stringify({statuses:state.statuses,schedules:state.schedules,notes:state.notes,eco:state.eco,config:state.config});
+  const json=JSON.stringify({statuses:state.statuses,schedules:state.schedules,notes:state.notes,eco:state.eco,config:state.config,machineExtra:state.machineExtra,milestones:state.milestones});
   google.script.run
     .withSuccessHandler(()=>showToast(`✅ テストメールを ${validEmails.join(', ')} に送信しました`))
     .withFailureHandler(err=>showToast('⚠️ 送信失敗: '+err.message))

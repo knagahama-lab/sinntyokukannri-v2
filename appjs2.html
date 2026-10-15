@@ -298,7 +298,7 @@ function saveEditModal(){
   addLog(`${id} 情報更新`);
   closeEditModal();
   showToast(`✅ ${id} を更新しました`);
-  saveToGAS(`${id} スケジュール更新`);
+  saveToGAS(`${id} スケジュール更新`,id);
   renderPage(currentPage);
 }
 
@@ -391,7 +391,7 @@ function saveEcoModal(){
   closeEcoModal();
   showToast(`✅ ${machine} / ${label}: ${val}台`);
   renderPage('eco');updateEcoBadge();
-  saveToGAS(`エコ [${machine}] ${label}: ${val}台`);
+  saveToGAS(`エコ [${machine}] ${label}: ${val}台`,machine);
 }
 
 /* ============================================================
@@ -429,7 +429,7 @@ function execMove(){
   closeMoveModal();
   showToast(`✅ ${actual}台 移動`);
   renderPage('eco');updateEcoBadge();
-  saveToGAS(`エコ [${machine}] ${fl}→${tl}: ${actual}台移動`);
+  saveToGAS(`エコ [${machine}] ${fl}→${tl}: ${actual}台移動`,machine);
 }
 
 

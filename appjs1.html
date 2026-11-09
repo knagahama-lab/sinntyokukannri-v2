@@ -549,12 +549,21 @@ const TAB_DEFS=[
   {id:'meetings', icon:'📝',defaultLabel:'定例・TODO',    section:'main'},
   {id:'eco',      icon:'♻️',defaultLabel:'エコフロー',    section:'main'},
   {id:'flow',     icon:'📈',defaultLabel:'進捗状況',    section:'main',required:true},
+  {id:'docs',     icon:'📁',defaultLabel:'資料一覧',      section:'main'},
+  {id:'parts',    icon:'🧩',defaultLabel:'機種管理',      section:'main'},
+  {id:'boards',   icon:'🔧',defaultLabel:'基板管理',      section:'main'},
+  {id:'priceimpact',icon:'📉',defaultLabel:'値上げインパクト',section:'main'},
+  {id:'catalog',  icon:'📖',defaultLabel:'製品図鑑',      section:'main'},
   {id:'future',   icon:'🔭',defaultLabel:'将来機種計画',  section:'main'},
   {id:'admin',    icon:'⚙️',defaultLabel:'管理コンソール',section:'admin',required:true},
   {id:'log',      icon:'📝',defaultLabel:'更新ログ',      section:'admin'},
 ];
 
 function applyTabSettings(){
+  if(!state.config.tabSettingsV2){
+    Object.values(state.config.tabSettings||{}).forEach(v=>{if(v)v.hidden=false;});
+    state.config.tabSettingsV2=true;
+  }
   const s=state.config.tabSettings||{};
   TAB_DEFS.forEach(t=>{
     const el=document.querySelector(`.nav-item[data-page="${t.id}"]`);
@@ -572,16 +581,17 @@ function applyTabSettings(){
 function saveTabSettings(){
   const s={};
   TAB_DEFS.forEach(t=>{
-    const hidden=document.getElementById('tab-hidden-'+t.id);
+    const shown=document.getElementById('tab-hidden-'+t.id); // チェックあり＝表示
     const label=document.getElementById('tab-label-'+t.id);
     const icon=document.getElementById('tab-icon-'+t.id);
     s[t.id]={
-      hidden:hidden?hidden.checked:false,
+      hidden:shown?!shown.checked:false,
       label:label?label.value.trim()||t.defaultLabel:t.defaultLabel,
       icon:icon?icon.value.trim()||t.icon:t.icon,
     };
   });
   state.config.tabSettings=s;
+  state.config.tabSettingsV2=true;
   saveToGAS();
   applyTabSettings();
   showToast('✅ タブ設定を保存しました');

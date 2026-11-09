@@ -1138,6 +1138,34 @@ function _obsFolder() {
   var all = DriveApp.getFoldersByName(OBS_FOLDER);
   return all.hasNext() ? all.next() : null;
 }
+// 取込対象ファイル: フォルダ直下（PCの同期済み）＋ サブフォルダ「スマホ」等（スマホのObsidianを同期したもの）
+// サブフォルダ側はPCで絞り込まれていないため、ファイル名の語句（定例・打合せ・議事録・藤商事）と日付(2026/10/09以降)で絞る
+var OBS_WORDS = ['定例', '打合せ', '議事録', '藤商事'];
+var OBS_SINCE = '2026-10-09';
+function _obsCollect(folder) {
+  var out = [];
+  var fs = folder.getFiles(); while (fs.hasNext()) out.push(fs.next());
+  var walk = function(fd, depth) {
+    var sub = fd.getFolders();
+    while (sub.hasNext()) {
+      var d = sub.next();
+      if (/^[._]/.test(d.getName()) || /_Templates|_Views|\.obsidian|\.trash/.test(d.getName())) continue;
+      var it = d.getFiles();
+      while (it.hasNext()) {
+        var f = it.next(), n = f.getName();
+        if (!/\.md$/i.test(n)) continue;
+        if (!OBS_WORDS.some(function(w) { return n.indexOf(w) >= 0 || d.getName().indexOf(w) >= 0; })) continue;
+        var m = n.match(/(20\d{2})(\d{2})(\d{2})/);
+        var ds = m ? m[1] + '-' + m[2] + '-' + m[3] : Utilities.formatDate(f.getLastUpdated(), 'Asia/Tokyo', 'yyyy-MM-dd');
+        if (ds < OBS_SINCE) continue;
+        out.push(f);
+      }
+      if (depth < 3) walk(d, depth + 1);
+    }
+  };
+  walk(folder, 0);
+  return out;
+}
 function _obsAddDays(ds, n) { var d = new Date(ds); if (isNaN(d)) return ''; d.setDate(d.getDate() + n); return Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd'); }
 
 /** トリガーから呼ばれる */
@@ -1162,9 +1190,9 @@ function importObsidianNotes(force) {
     var now = new Date().toISOString();
     var done = [], ovKeys = [], crmQueue = [];
 
-    var files = folder.getFiles();
-    while (files.hasNext()) {
-      var f = files.next();
+    var list = _obsCollect(folder);
+    for (var li = 0; li < list.length; li++) {
+      var f = list[li];
       var fname = f.getName();
       if (!/\.md$/i.test(fname)) continue;
       var fid = f.getId(), upd = f.getLastUpdated().getTime();

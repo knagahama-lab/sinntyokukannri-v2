@@ -1347,6 +1347,140 @@ function _mergeMeetingStore(curJson, incJson) {
   return JSON.stringify(out);
 }
 
+/* ============================================================
+   生産計画表（サン電子）の自動連携
+   Drive上の生産計画表（スプレッドシート または Excel）を毎朝1回確認し、
+   ファイルが更新されていたときだけ、最新の日付シート(YYMMDD)を読み込んで機種DBへ反映する。
+   スプレッドシート側の更新は月1回程度のため、更新が無い日は何もしない。
+   【一度だけ実行】 setupPlanSyncTrigger（画面のボタンからも可）
+============================================================ */
+var PLAN_FILE_ID_DEFAULT = '1NEhl9uBHpqXthJhTVqDjD4qD7o_b09oe';
+function _planFileId() { return PropertiesService.getScriptProperties().getProperty('planFileId') || PLAN_FILE_ID_DEFAULT; }
+
+function _planDate(v) {
+  if (!v) return '';
+  if (v instanceof Date) return isNaN(v) ? '' : Utilities.formatDate(v, 'Asia/Tokyo', 'yyyy-MM-dd');
+  var s = String(v).trim();
+  var m = s.match(/^(\d{4})[\-\/.](\d{1,2})[\-\/.](\d{1,2})/);
+  if (m) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
+  if (m) return (m[3].length === 2 ? '20' + m[3] : m[3]) + '-' + ('0' + m[1]).slice(-2) + '-' + ('0' + m[2]).slice(-2);
+  return '';
+}
+function _planStr(v) { return v == null ? '' : (v instanceof Date ? _planDate(v) : String(v).trim()); }
+
+// 生産計画表の行データ → 機種DB（画面側 _mdbFromSunDenshiRows と同じ判定）
+function _planRowsToModelDB(rows, sheetName, mdb) {
+  var st = { added: 0, updated: 0 };
+  var find = function(lbl) { for (var i = 0; i < Math.min(rows.length, 20); i++) { if ((rows[i] || []).slice(0, 5).some(function(v) { return _planStr(v) === lbl; })) return i; } return -1; };
+  var codeIdx = find('機種名'), nameIdx = find('タイトル'), salesIdx = find('販売時期');
+  if (codeIdx < 0) return st;
+  var labelIdx = {}, grp = null;
+  rows.forEach(function(row, i) {
+    row = row || [];
+    var b = _planStr(row[1]) || null; if (b) grp = b;
+    var c = _planStr(row[2]); if (!c) return;
+    (labelIdx[c] = labelIdx[c] || []).push({ idx: i, group: grp, b: b });
+  });
+  var first = function(l) { return (labelIdx[l] && labelIdx[l][0]) ? labelIdx[l][0].idx : -1; };
+  var byGroup = function(l, g) { var f = (labelIdx[l] || []).filter(function(x) { return x.group === g; })[0]; return f ? f.idx : -1; };
+  var aggIdx = first('部品集約時期'), brandIdx = first('販売ブランド'), tgtIdx = first('調達目標台数');
+  var custIdx = byGroup('販売台数', 'お客様計画数字'), sunIdx = byGroup('販売台数', 'サン電子数値');
+  var boardRows = (labelIdx['手配対象'] || []).map(function(x) { return { cat: x.b, idx: x.idx }; });
+  var codeRow = rows[codeIdx] || [];
+  var cell = function(i, col) { return i >= 0 && rows[i] ? rows[i][col] : null; };
+  var today = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+  for (var col = 3; col < codeRow.length; col++) {
+    var raw = _planStr(codeRow[col]);
+    if (!raw || raw === '機種名') continue;
+    var title = _planStr(cell(nameIdx, col)), sales = _planDate(cell(salesIdx, col));
+    if (!title && !sales) continue;
+    var key = _obsKey(raw, 'fuji'); if (!key) continue;
+    var boards = {};
+    boardRows.forEach(function(br) { var v = _planStr(cell(br.idx, col)); if (v) boards[br.cat] = v; });
+    var qty = function(i) { var v = cell(i, col); return v == null || v === '' ? '' : (typeof v === 'number' ? v.toLocaleString() : _planStr(v)); };
+    var patch = { code: raw.replace(/^[eLPp]:/, ''), title: title, kind: /^e:/.test(raw) ? 'パチンコ' : /^L:/.test(raw) ? 'スロット' : '',
+      brand: _planStr(cell(brandIdx, col)), salesDate: sales, aggDate: _planDate(cell(aggIdx, col)),
+      targetQty: qty(tgtIdx), salesQty: qty(custIdx) || qty(sunIdx), boards: boards, planChange: _planStr((rows[1] || [])[col]) };
+    var isNew = !mdb[key];
+    var r = mdb[key] = mdb[key] || { key: key, code: key, title: '', kind: '', brand: '', series: '', person: '', salesDate: '', aggDate: '', targetQty: '', salesQty: '', boards: {}, hw: {}, longlead: {}, sheets: {}, src: {}, updatedAt: '' };
+    Object.keys(patch).forEach(function(k) {
+      var v = patch[k];
+      if (v == null || v === '') return;
+      if (typeof v === 'object') { r[k] = r[k] || {}; Object.keys(v).forEach(function(x) { if (v[x]) r[k][x] = v[x]; }); }
+      else r[k] = v;
+    });
+    r.customer = 'fuji'; r.src = r.src || {}; r.src['生産計画（自動連携） ' + sheetName] = today; r.updatedAt = today;
+    isNew ? st.added++ : st.updated++;
+  }
+  return st;
+}
+
+/** トリガーから呼ばれる */
+function syncProductionPlanTrigger() { syncProductionPlan(false); }
+
+/** 生産計画表を確認し、更新されていれば最新シートを機種DBへ反映。force=true で更新が無くても読み込む */
+function syncProductionPlan(force) {
+  var lock = LockService.getScriptLock(); lock.waitLock(30000);
+  var tmpId = '';
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var id = _planFileId();
+    var file = DriveApp.getFileById(id);
+    var upd = file.getLastUpdated().getTime();
+    var last = {}; try { last = JSON.parse(props.getProperty('planSyncLast') || '{}'); } catch (e) {}
+    if (force !== true && last.fileUpdated && last.fileUpdated >= upd) {
+      props.setProperty('planSyncLast', JSON.stringify(Object.assign(last, { checkedAt: new Date().toISOString() })));
+      return JSON.stringify({ success: true, skipped: true, message: '更新なし（前回取込: ' + (last.sheet || '') + '）' });
+    }
+    // Excel(.xlsx)の場合は一時的にスプレッドシートへ変換して読む
+    var ssId = id;
+    if (file.getMimeType() !== MimeType.GOOGLE_SHEETS) {
+      var res = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + id + '/copy?supportsAllDrives=true', {
+        method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+        headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+        payload: JSON.stringify({ name: '生産計画表_自動連携用一時変換', mimeType: 'application/vnd.google-apps.spreadsheet' })
+      });
+      if (res.getResponseCode() !== 200) throw new Error('Excelの変換に失敗しました: ' + res.getContentText().slice(0, 200));
+      tmpId = ssId = JSON.parse(res.getContentText()).id;
+    }
+    var ss = SpreadsheetApp.openById(ssId);
+    var dated = ss.getSheets().map(function(s) { return s.getName(); }).filter(function(n) { return /^\d{6}$/.test(n); }).sort().reverse();
+    if (!dated.length) throw new Error('日付(YYMMDD)名のシートが見つかりません');
+    var sheetName = dated[0];
+    var rows = ss.getSheetByName(sheetName).getDataRange().getValues();
+    var mdb = {}; try { mdb = JSON.parse(loadModelDB() || '{}'); if (mdb.__error) mdb = {}; } catch (e) {}
+    var st = _planRowsToModelDB(rows, sheetName, mdb);
+    if (st.added || st.updated) _modelDbFile().setContent(JSON.stringify(mdb));
+    // 「生産計画Excelの月次取込」の表示を消すため取込日を記録
+    var state = {}; try { state = JSON.parse(loadData() || '{}'); } catch (e) {}
+    state.config = state.config || {};
+    state.config.lastSunDenshiImportAt = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+    state.config.lastSunDenshiImportSheet = sheetName + '（自動連携）';
+    props.setProperty('sinntyoku_state', JSON.stringify(state));
+    var info = { fileUpdated: upd, sheet: sheetName, added: st.added, updated: st.updated, at: new Date().toISOString(), checkedAt: new Date().toISOString(), fileName: file.getName() };
+    props.setProperty('planSyncLast', JSON.stringify(info));
+    Logger.log('生産計画 自動連携: ' + sheetName + ' 新規' + st.added + ' 更新' + st.updated);
+    return JSON.stringify({ success: true, skipped: false, sheet: sheetName, added: st.added, updated: st.updated });
+  } catch (e) {
+    Logger.log('生産計画 自動連携エラー: ' + e.message);
+    return JSON.stringify({ success: false, error: e.message });
+  } finally {
+    if (tmpId) { try { DriveApp.getFileById(tmpId).setTrashed(true); } catch (e) {} }
+    lock.releaseLock();
+  }
+}
+function setupPlanSyncTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function(t) { if (t.getHandlerFunction() === 'syncProductionPlanTrigger') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('syncProductionPlanTrigger').timeBased().everyDays(1).atHour(6).create();
+  return syncProductionPlan(true);
+}
+function getPlanSyncStatus() {
+  var active = ScriptApp.getProjectTriggers().some(function(t) { return t.getHandlerFunction() === 'syncProductionPlanTrigger'; });
+  var last = {}; try { last = JSON.parse(PropertiesService.getScriptProperties().getProperty('planSyncLast') || '{}'); } catch (e) {}
+  return JSON.stringify({ active: active, last: last, fileId: _planFileId() });
+}
+
 /**
  * 連携スプレッドシートの全シートの表示値を返す（機種DB取込用）。
  * レイアウト判定・列の対応付けはクライアント側で行う。

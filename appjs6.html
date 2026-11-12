@@ -353,6 +353,10 @@ function openImportModal(){
             <input type="file" multiple accept=".pdf,.xlsx,.xls" style="display:none" onchange="_importOtherDocs(event)"></label></div>
       </div>
       <div class="imp-card" style="margin-top:12px;flex-direction:row;align-items:center;justify-content:space-between;">
+        <div><div class="imp-t">🔄 生産計画表の自動連携</div><div class="muted" style="font-size:11px;" id="plan-sync-st">確認中...</div></div>
+        <div style="display:flex;gap:6px;"><button class="btn btn-sm" onclick="_planCall('syncProductionPlan',this,true)">今すぐ読み込む</button>
+        <button class="btn btn-primary btn-sm" id="plan-sync-on" onclick="_planCall('setupPlanSyncTrigger',this)">自動連携を有効化</button></div></div>
+      <div class="imp-card" style="margin-top:12px;flex-direction:row;align-items:center;justify-content:space-between;">
         <div><div class="imp-t">📤 スプレッドシートへ書き出し</div><div class="muted" style="font-size:11px;">機種DB・登録機種・構成表・取込履歴・得意先を「DB_」シートに書き出します</div></div>
         <div style="display:flex;gap:6px;"><button class="btn btn-sm" onclick="_syncFromSheet(this)">シートから反映</button>
         <button class="btn btn-primary btn-sm" onclick="_syncToSheet(this)">書き出す</button></div></div>
@@ -365,6 +369,7 @@ function openImportModal(){
   document.body.appendChild(ov);
   _renderImportHistory();
   if(typeof _renderDbSheetBox==='function')_renderDbSheetBox();
+  _planStatus();
 }
 // 他社用: 1行=1機種のExcel/CSVを機種DBへ（列名で自動対応付け）
 function handleGenericModelExcel(ev){
@@ -423,6 +428,21 @@ function _syncFromSheet(btn){
     })
     .withFailureHandler(err=>{if(btn){btn.disabled=false;btn.textContent='シートから反映';}showToast('⚠️ 反映失敗: '+err.message,6000);})
     .syncFromSpreadsheet();
+}
+function _planStatus(){
+  if(typeof google==='undefined'||!google.script)return;
+  google.script.run.withSuccessHandler(res=>{const r=JSON.parse(res);const el=document.getElementById('plan-sync-st');if(!el)return;const l=r.last||{};
+    el.innerHTML=(r.active?'<b style="color:#16a34a;">有効（毎朝6時に更新を確認、更新時のみ取込）</b>':'<b style="color:#b45309;">未設定</b>')+(l.sheet?` ／ 最終取込: シート ${_e6(l.sheet)}（${_e6(String(l.at||'').slice(0,10))}・新規${l.added||0} 更新${l.updated||0}）`:'');
+    const b=document.getElementById('plan-sync-on');if(b&&r.active)b.style.display='none';}).getPlanSyncStatus();
+}
+function _planCall(fn,btn,force){
+  btn.disabled=true;btn.textContent='処理中...';
+  const run=google.script.run.withSuccessHandler(res=>{const r=JSON.parse(res);
+    if(!r.success){showToast('⚠️ '+r.error,8000);btn.disabled=false;btn.textContent='再実行';return;}
+    showToast(r.skipped?r.message:`✅ 生産計画 シート${r.sheet}を取込（新規${r.added}・更新${r.updated}）画面を更新します`,5000);
+    if(!r.skipped)setTimeout(()=>location.reload(),1500);else _planStatus();
+  }).withFailureHandler(err=>{showToast('⚠️ '+err.message,8000);btn.disabled=false;});
+  force?run[fn](true):run[fn]();
 }
 function closeImportModal(){const m=document.getElementById('import-modal');if(m)m.remove();}
 </script>

@@ -67,6 +67,7 @@ function _homeTodo(alerts,csTodo){
   const li=state.config.lastSunDenshiImportAt, ds=li?Math.floor((todayD-new Date(li))/86400000):null;
   if(!li||ds>35)t.push({c:'st-gray',txt:`📊 生産計画Excelの月次取込（${li?ds+'日経過':'未取込'}）`,act:`openImportModal()`});
   if(typeof _mtTodoStrip==='function')_mtTodoStrip().forEach(x=>t.unshift(x));
+  if(typeof _qtTodo==='function')_qtTodo().slice(0,6).forEach(x=>t.unshift({c:x.s.diff<0?'st-red':'st-yellow',txt:`💴 ${_dispKey(x.key)} ${x.kind.label}見積: ${x.s.step?x.s.step.label.slice(1):'提出'}（${x.s.diff<0?'期限超過':x.s.stepDue}）`,act:`openQuoteEditor('${_e6(x.key)}','${x.kind.k}')`}));
   if(!t.length)return '';
   return `<div class="todo-strip"><strong style="font-size:12px;margin-right:4px;">今やること</strong>${t.map(x=>`<span class="st ${x.c}" style="cursor:pointer;" onclick="${x.act}">${_e6(x.txt)}</span>`).join('')}</div>`;
 }

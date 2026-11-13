@@ -808,6 +808,7 @@ function renderPage(page){
   if(page==='dashboard')renderHome();
   else if(page==='docs')renderDocs();
   else if(page==='csheets')renderConfigSheets();
+  else if(page==='quotes')renderQuotes();
   else if(page==='meetings')renderMeetings();
   else if(page==='schedule')renderSchedule();
   else if(page==='eco')renderEco();
@@ -872,6 +873,7 @@ function _init(saved){
       if(s.configSheets)state.configSheets=s.configSheets;
       if(s.modelOverrides)state.modelOverrides=s.modelOverrides;
       if(s.flowProgress)state.flowProgress=s.flowProgress;
+      if(s.quotes)state.quotes=s.quotes;
       if(s.driveFiles)Object.assign(state.driveFiles,s.driveFiles);
       if(s.linkageUrlOverrides)Object.assign(state.linkageUrlOverrides,s.linkageUrlOverrides);
       if(s.config&&s.config.tabSettings)Object.assign(state.config.tabSettings,s.config.tabSettings);

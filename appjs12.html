@@ -1,0 +1,173 @@
+<script>
+/* ============================================================
+   見積書 提出状況（機種ごと: 仕掛基板 / PCB / 組立費）
+   段取り: ①委託先へ仕入見積を依頼 → ②仕入見積を受領 → ③自社見積を作成 → ④提出
+   期限: 見積の種類ごとの基準日（部品集約時期・見本機実装など）から提出期限を逆算し、
+         作成期限＝提出期限−作成日数、依頼期限＝作成期限−委託先の回答日数 を自動計算
+   自動判定: 前の機種（同じ得意先・販売時期順）と枠型式が違えば「組立費」を要に
+   見積台帳連携: その機種の見積書の内容から種類を判別できれば「提出済」に（PDFリンクも表示）
+   データ: state.quotes[機種キー][種類] = {need,vendor,req,recv,made,sub,url,memo}
+   ※ このファイルの文字列にスラッシュ2つやスラッシュ+アスタリスクを書かないこと
+============================================================ */
+if(!state.quotes)state.quotes={};
+const QT_KINDS=[{k:'wip',label:'仕掛基板',re:/仕掛|基板実装|実装基板/},{k:'pcb',label:'PCB',re:/PCB|生基板|プリント基板/i},{k:'assy',label:'組立費',re:/組立/}];
+const QT_STEPS=[{k:'req',label:'①仕入見積 依頼'},{k:'recv',label:'②仕入見積 受領'},{k:'made',label:'③自社見積 作成'},{k:'sub',label:'④提出'}];
+const QT_DEFAULT_RULES={
+  wip:{base:'aggDate',offset:-30,fb:'salesDate',fbOffset:-150,make:3,lead:14},
+  pcb:{base:'sampleImpl',offset:-30,fb:'salesDate',fbOffset:-150,make:3,lead:14},
+  assy:{base:'prodImpl',offset:-30,fb:'salesDate',fbOffset:-90,make:3,lead:14},
+};
+let _qtFilter='todo',_qtTerm='';
+function _e12(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function _qtRules(){const r=state.config.quoteRules||{};const o={};QT_KINDS.forEach(x=>o[x.k]=Object.assign({},QT_DEFAULT_RULES[x.k],r[x.k]||{}));return o;}
+function _qtRec(key,k){const m=state.quotes[key]=state.quotes[key]||{};return m[k]=m[k]||{need:'',vendor:'',req:'',recv:'',made:'',sub:'',url:'',memo:''};}
+function _qtPeek(key,k){return ((state.quotes[key]||{})[k])||{};}
+
+// 期限の計算（構成表と同じ基準日を使う）
+function _qtDue(key,k){
+  const r=_qtRules()[k];const b=_csBaseDates(key);
+  let sub='',basis='';
+  if(b[r.base]){sub=_addDays(b[r.base],+r.offset);basis=CS_BASES[r.base];}
+  else if(r.fb&&b[r.fb]){sub=_addDays(b[r.fb],+r.fbOffset);basis=CS_BASES[r.fb];}
+  if(!sub)return {sub:'',made:'',req:'',basis:''};
+  const made=_addDays(sub,-(+r.make||0));
+  return {sub,made,req:_addDays(made,-(+r.lead||0)),basis};
+}
+// 枠の切り替え判定: 同じ得意先の機種を販売時期順に並べ、直前の機種と枠が違えば組立費が要
+function _qtFrameChange(key){
+  const cust=_keyCust(key);
+  const rows=_modelRows('all').filter(r=>_keyCust(r.key)===cust).map(r=>{const v=r.db||_mdbView(r.key)||{};return {key:r.key,frame:_frameOf(v),date:v.salesDate||(v.longlead||{}).deliveryDate||''};})
+    .filter(x=>x.frame&&x.date).sort((a,b)=>a.date.localeCompare(b.date));
+  const i=rows.findIndex(x=>x.key===key);
+  if(i<0)return null;
+  if(i===0)return {changed:false,prev:null,frame:rows[i].frame};
+  return {changed:rows[i].frame!==rows[i-1].frame,prev:rows[i-1],frame:rows[i].frame};
+}
+// 見積台帳から種類を判別した提出済み見積
+function _qtLedger(key,k){
+  const m=_machineForKey(key);if(!m)return null;
+  const kind=QT_KINDS.find(x=>x.k===k);
+  return getEstimatesForMachine(m.id).find(e=>e.quoteSubmitted&&kind.re.test([e.memo,e.status,e.quoteNo,e.name,e.title].join(' ')))||null;
+}
+function _qtNeed(key,k){
+  const r=_qtPeek(key,k);
+  if(r.need)return {need:r.need,auto:false};
+  if(k==='assy'){const f=_qtFrameChange(key);if(f)return {need:f.changed?'要':'不要',auto:true,why:f.changed?`枠が切り替わり（${f.prev.frame}→${f.frame}）`:`枠は前機種と同じ（${f.frame}）`};}
+  return {need:'',auto:true,why:'未判定'};
+}
+function _qtState(key,k){
+  const r=_qtPeek(key,k);const n=_qtNeed(key,k);const d=_qtDue(key,k);const led=_qtLedger(key,k);
+  const sub=r.sub||(led?(led.quoteDate||'提出済'):'');
+  if(n.need==='不要')return {cls:'st-gray',label:'不要',n,d,r,led};
+  if(sub)return {cls:'st-green',label:'提出済',n,d,r,led,subDate:sub};
+  const step=QT_STEPS.find(s=>!r[s.k]);
+  const stepDue=step?d[step.k==='recv'?'made':step.k]:'';
+  const diff=stepDue?getDiff(stepDue):null;
+  let cls='st-gray',label=step?step.label.slice(1)+'待ち':'提出待ち';
+  if(!n.need){label='要否 未判定';}
+  else if(diff!=null&&diff<0){cls='st-red';label=(step?step.label.slice(1):'')+' 期限超過';}
+  else if(diff!=null&&diff<=14){cls='st-yellow';label=(step?step.label.slice(1):'')+' 期限近い';}
+  else cls='st-blue';
+  return {cls,label,n,d,r,led,step,stepDue,diff};
+}
+// 今やること用
+function _qtTodo(){
+  const t=[];
+  _modelRows('active').forEach(row=>{if(_csIsPast(row.key))return;QT_KINDS.forEach(x=>{const s=_qtState(row.key,x.k);
+    if(s.n.need==='要'&&s.stepDue&&s.diff!=null&&s.diff<=7)t.push({key:row.key,kind:x,s});});});
+  return t.sort((a,b)=>String(a.s.stepDue).localeCompare(String(b.s.stepDue)));
+}
+
+/* ---------- 画面 ---------- */
+function renderQuotes(){
+  if(!_mdbLoadStarted&&typeof _loadModelDB==='function')_loadModelDB();
+  const term=_qtTerm.trim().toLowerCase();
+  const rows=_modelRows('active').filter(r=>!_csIsPast(r.key)).map(r=>{const v=r.db||{};
+    return {r,title:v.title||'',sales:v.salesDate||(v.longlead||{}).deliveryDate||'',frame:_frameOf(v),st:QT_KINDS.map(x=>({x,s:_qtState(r.key,x.k)}))};})
+    .filter(o=>!term||(o.r.key+' '+o.title).toLowerCase().includes(term));
+  const isTodo=o=>o.st.some(c=>c.s.n.need==='要'&&(c.s.cls==='st-red'||c.s.cls==='st-yellow'));
+  const isOpen=o=>o.st.some(c=>c.s.n.need==='要'&&c.s.label!=='提出済');
+  const isUndec=o=>o.st.some(c=>!c.s.n.need);
+  const pass=o=>_qtFilter==='todo'?isTodo(o):_qtFilter==='open'?isOpen(o):_qtFilter==='undec'?isUndec(o):true;
+  const list=rows.filter(pass).sort((a,b)=>String(a.sales||'9999').localeCompare(String(b.sales||'9999')));
+  const fmt=v=>v?_e12(String(v).replace(/-/g,'/')):'<span class="same">—</span>';
+  const cells=o=>o.st.map(c=>{const s=c.s;const on=`onclick="openQuoteEditor('${_e12(o.r.key)}','${c.x.k}')"`;
+    return `<td class="c cs" ${on}>${_qtNeedSel(o.r.key,c.x.k,s.n)}</td>
+      <td class="c cs" ${on}><span class="st ${s.cls}" style="padding:0 6px;">${_e12(s.label)}</span>${s.led&&s.led.url?` <a class="q" href="${_e12(s.led.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">📄</a>`:''}</td>
+      <td class="c cs pt-cur" ${on}>${s.n.need==='不要'?'<span class="same">—</span>':fmt(s.d.sub)}</td>
+      <td class="c cs" ${on}>${s.n.need==='要'&&s.stepDue&&s.label!=='提出済'?fmt(s.stepDue):'<span class="same">—</span>'}</td>`;}).join('');
+  const rules=_qtRules();
+  const sel=(id,v)=>`<select id="${id}" style="font-size:11px;padding:3px;">${Object.entries(CS_BASES).map(([k,l])=>`<option value="${k}"${k===v?' selected':''}>${l}</option>`).join('')}</select>`;
+  const ruleRow=x=>{const r=rules[x.k];return `<tr><td class="name">${x.label}</td>
+    <td>${sel('qtr-'+x.k+'-base',r.base)} の <input id="qtr-${x.k}-offset" type="number" value="${r.offset}" style="width:56px;font-size:11px;"> 日</td>
+    <td>${sel('qtr-'+x.k+'-fb',r.fb)} の <input id="qtr-${x.k}-fbOffset" type="number" value="${r.fbOffset}" style="width:56px;font-size:11px;"> 日</td>
+    <td><input id="qtr-${x.k}-make" type="number" value="${r.make}" style="width:50px;font-size:11px;"> 日</td>
+    <td><input id="qtr-${x.k}-lead" type="number" value="${r.lead}" style="width:50px;font-size:11px;"> 日</td></tr>`;};
+  document.getElementById('page-quotes').innerHTML=`
+    <div class="pt-bar">
+      ${_ptChip('⚠️ 期限超過・期限近い',rows.filter(isTodo).length,_qtFilter==='todo',"_qtFilter='todo';renderQuotes()")}
+      ${_ptChip('未提出あり',rows.filter(isOpen).length,_qtFilter==='open',"_qtFilter='open';renderQuotes()")}
+      ${_ptChip('要否 未判定',rows.filter(isUndec).length,_qtFilter==='undec',"_qtFilter='undec';renderQuotes()")}
+      ${_ptChip('すべて',rows.length,_qtFilter==='all',"_qtFilter='all';renderQuotes()")}
+      <input id="qt-q" class="pt-in" style="flex:1;min-width:180px;" placeholder="機種・タイトルで検索..." value="${_e12(_qtTerm)}"
+        oninput="clearTimeout(window._qtT);window._qtT=setTimeout(()=>{_qtTerm=this.value;renderQuotes();const el=document.getElementById('qt-q');el.focus();el.setSelectionRange(el.value.length,el.value.length);},250)">
+      <button class="btn btn-sm" onclick="_ptPrint('見積書 提出状況','qt-pt')">🖨 印刷</button>
+      <button class="btn btn-sm" style="color:#16a34a;border-color:#16a34a;" onclick="_qtCsv()">📥 CSV</button></div>
+    <div class="pt-info">${list.length}機種（販売済み・量産終了は除く）。黄色が提出期限。「次の期限」は今の段取り（依頼→受領→作成→提出）の期限。組立費は前の機種と枠が違うと自動で「要」。見積台帳に登録された見積書は自動で提出済。セルをクリックで日付・委託先・URLを登録。</div>
+    <div class="pt-wrap" id="qt-pt"><table class="pt"><thead>
+      <tr><th rowspan="2">機種</th><th rowspan="2">タイトル</th><th rowspan="2">販売時期</th><th rowspan="2">枠</th>${QT_KINDS.map(x=>`<th colspan="4">${x.label} 見積</th>`).join('')}</tr>
+      <tr>${QT_KINDS.map(()=>'<th>要否</th><th>状態</th><th class="pt-cur">提出期限</th><th>次の期限</th>').join('')}</tr></thead>
+      <tbody>${list.map(o=>`<tr><td class="name" style="cursor:pointer;" onclick="openMachineEditor('${_e12(o.r.key)}')">${_e12(_dispKey(o.r.key))}${o.r.m?'<span class="pt-tag">登録</span>':''}</td>
+        <td class="spec">${_e12(o.title)}</td><td class="c">${fmt(o.sales)}</td><td class="c">${_e12(o.frame)||'<span class="same">—</span>'}</td>${cells(o)}</tr>`).join('')
+        ||`<tr><td colspan="${4+QT_KINDS.length*4}" class="c same" style="padding:20px;">該当する機種がありません</td></tr>`}</tbody></table></div>
+    <details style="margin-top:12px;"><summary style="cursor:pointer;font-size:13px;font-weight:700;padding:8px 12px;background:#fff;border:1px solid var(--border-light);border-radius:8px;">⚙️ 期限の計算ルール</summary>
+      <div class="pt-info" style="margin-top:8px;">提出期限＝基準日のN日（前ならマイナス）。作成期限＝提出期限−作成日数、依頼期限＝作成期限−委託先の回答日数。</div>
+      <div class="pt-wrap" style="max-height:none;"><table class="pt"><thead><tr><th>見積</th><th>提出期限の基準日</th><th>代替（基準日が無い場合）</th><th>作成日数</th><th>委託先の回答日数</th></tr></thead><tbody>${QT_KINDS.map(ruleRow).join('')}</tbody></table></div>
+      <div style="margin-top:8px;"><button class="btn btn-primary btn-sm" onclick="saveQuoteRules()">💾 ルールを保存</button>
+        <button class="btn btn-sm" onclick="state.config.quoteRules={};saveToGAS();renderQuotes();">初期値に戻す</button></div></details>`;
+}
+function _qtNeedSel(key,k,n){
+  const cur=_qtPeek(key,k).need||'';
+  const autoLbl=n.auto?(n.need?'自動:'+n.need:'未判定'):'自動判定';
+  return `<select class="cs-sel st ${n.need==='要'?'st-blue':n.need==='不要'?'st-gray':'st-yellow'}" title="${_e12(n.why||'')}" onclick="event.stopPropagation()"
+    onchange="setQuoteNeed('${_e12(key)}','${k}',this.value)"><option value=""${!cur?' selected':''}>${_e12(autoLbl)}</option><option${cur==='要'?' selected':''}>要</option><option${cur==='不要'?' selected':''}>不要</option></select>`;
+}
+function setQuoteNeed(key,k,v){_qtRec(key,k).need=v;saveToGAS();const w=document.querySelector('#qt-pt');const st=w?w.scrollTop:0;renderQuotes();const w2=document.querySelector('#qt-pt');if(w2)w2.scrollTop=st;}
+function saveQuoteRules(){
+  const o={};const g=id=>document.getElementById(id).value;
+  QT_KINDS.forEach(x=>{o[x.k]={base:g(`qtr-${x.k}-base`),offset:+g(`qtr-${x.k}-offset`)||0,fb:g(`qtr-${x.k}-fb`),fbOffset:+g(`qtr-${x.k}-fbOffset`)||0,make:+g(`qtr-${x.k}-make`)||0,lead:+g(`qtr-${x.k}-lead`)||0};});
+  state.config.quoteRules=o;saveToGAS();showToast('✅ 見積の期限ルールを保存しました');renderQuotes();
+}
+function openQuoteEditor(key,k){
+  const x=QT_KINDS.find(y=>y.k===k);const s=_qtState(key,k);const r=s.r;const d=s.d;const v=_mdbView(key)||{};
+  const inp=(id,type,val,ph)=>`<input id="qte-${id}" type="${type}" value="${_e12(val||'')}" placeholder="${_e12(ph||'')}" class="me-in">`;
+  _overlay('qt-editor',`💴 ${_e12(_dispKey(key))} ${_e12(v.title||'')} — ${x.label} 見積`,`
+    <div class="pt-info">要否: <b>${_e12(s.n.need||'未判定')}</b>${s.n.why?'（'+_e12(s.n.why)+'）':''}　／　提出期限: <b>${_e12(d.sub||'基準日なし')}</b>${d.basis?'（'+_e12(d.basis)+'基準）':''}
+      ${s.led?`<br>見積台帳: ${_e12(s.led.quoteNo||'')} ${_e12(s.led.quoteDate||'')} ${s.led.url?`<a class="q" href="${_e12(s.led.url)}" target="_blank" rel="noopener">見積書を開く</a>`:''}`:''}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <label class="me-f">要否<select id="qte-need" class="me-in"><option value="">自動判定</option><option${r.need==='要'?' selected':''}>要</option><option${r.need==='不要'?' selected':''}>不要</option></select></label>
+      <label class="me-f">委託先（仕入見積の依頼先）${inp('vendor','text',r.vendor,'例: 〇〇電子')}</label>
+    </div>
+    <div class="pt-wrap" style="max-height:none;margin-top:10px;"><table class="pt"><thead><tr><th>段取り</th><th class="pt-cur">期限</th><th>実施日</th></tr></thead><tbody>
+      ${QT_STEPS.map(st=>`<tr><td class="name">${st.label}</td><td class="c pt-cur">${_e12(d[st.k==='recv'?'made':st.k]||'—')}</td>
+        <td><input id="qte-${st.k}" type="date" class="me-in" value="${_e12(r[st.k]||'')}"> <a href="#" class="q" style="font-size:11px;" onclick="event.preventDefault();document.getElementById('qte-${st.k}').value='${_todayStr()}'">今日</a></td></tr>`).join('')}
+    </tbody></table></div>
+    <label class="me-f" style="margin-top:10px;">見積書のURL（Drive等）${inp('url','text',r.url,'自社見積書・仕入見積書のリンク')}</label>
+    <label class="me-f" style="margin-top:10px;">メモ<textarea id="qte-memo" class="me-in" rows="2">${_e12(r.memo||'')}</textarea></label>
+    <div style="display:flex;gap:6px;margin-top:12px;"><span style="flex:1;"></span>
+      <button class="btn btn-sm" onclick="document.getElementById('qt-editor').remove()">キャンセル</button>
+      <button class="btn btn-primary btn-sm" onclick="saveQuoteEditor('${_e12(key)}','${k}')">💾 保存</button></div>`,620);
+}
+function saveQuoteEditor(key,k){
+  const r=_qtRec(key,k);const g=id=>(document.getElementById('qte-'+id).value||'').trim();
+  ['need','vendor','req','recv','made','sub','url','memo'].forEach(f=>r[f]=g(f));
+  addLog(`💴 見積 ${_dispKey(key)} ${QT_KINDS.find(x=>x.k===k).label}: ${r.sub?'提出 '+r.sub:r.made?'作成 '+r.made:r.recv?'受領 '+r.recv:r.req?'依頼 '+r.req:'更新'}`);
+  saveToGAS();document.getElementById('qt-editor').remove();renderPage(currentPage);
+}
+function _qtCsv(){
+  const h=['機種','タイトル','販売時期','枠'];QT_KINDS.forEach(x=>h.push(x.label+' 要否',x.label+' 状態',x.label+' 提出期限',x.label+' 依頼期限',x.label+' 依頼日',x.label+' 受領日',x.label+' 作成日',x.label+' 提出日',x.label+' 委託先'));
+  const rows=_modelRows('active').filter(r=>!_csIsPast(r.key)).map(r=>{const v=r.db||{};const o=[_dispKey(r.key),v.title||'',v.salesDate||'',_frameOf(v)];
+    QT_KINDS.forEach(x=>{const s=_qtState(r.key,x.k);o.push(s.n.need,s.label,s.d.sub,s.d.req,s.r.req||'',s.r.recv||'',s.r.made||'',s.r.sub||s.subDate||'',s.r.vendor||'');});return o;});
+  _ptCsvDownload('見積書提出状況',h,rows);
+}
+</script>

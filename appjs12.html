@@ -10,10 +10,11 @@
    ※ このファイルの文字列にスラッシュ2つやスラッシュ+アスタリスクを書かないこと
 ============================================================ */
 if(!state.quotes)state.quotes={};
-const QT_KINDS=[{k:'mnt',label:'実装費',re:/実装/},{k:'assy',label:'組立費',re:/組立/}];
+const QT_KINDS=[{k:'wip',label:'仕掛基板',re:/仕掛|実装/,trig:'ハードウェア構成表'},{k:'pcb',label:'PCB',re:/PCB|生基板|プリント/i,trig:'ハードウェア構成表'},{k:'assy',label:'組立費',re:/組立/,trig:'構成表'}];
 const QT_STEPS=[{k:'req',label:'①仕入見積 依頼'},{k:'recv',label:'②仕入見積 受領'},{k:'made',label:'③自社見積 作成'},{k:'sub',label:'④提出'}];
 const QT_DEFAULT_RULES={
-  mnt:{base:'sampleImpl',offset:-30,fb:'salesDate',fbOffset:-150,make:3,lead:14},
+  wip:{base:'sampleImpl',offset:-30,fb:'salesDate',fbOffset:-150,make:3,lead:14},
+  pcb:{base:'sampleImpl',offset:-30,fb:'salesDate',fbOffset:-150,make:3,lead:14},
   assy:{base:'prodImpl',offset:-30,fb:'salesDate',fbOffset:-90,make:3,lead:14},
 };
 // 機種の見積項目: 基板構成（HW構成一覧表＋生産計画の払出基板）の基板ごとの実装費 ＋ 組立費
@@ -22,8 +23,8 @@ function _qtItems(key){
   const m=_machineForKey(key);const v=_mdbView(key)||{};
   const b=_rowBoards({key,m,db:v});const out=[];const seen={};
   ['M','D','DE','E','C'].forEach(slot=>{const bk=_bkey(b[slot]);if(!_bkeyValid(bk)||seen[bk])return;seen[bk]=1;
-    out.push({id:'mnt_'+bk,kind:'mnt',board:bk,slot,label:`実装費 ${_QT_SLOT[slot]} ${bk}`});});
-  out.push({id:'assy',kind:'assy',label:`組立費${_frameOf(v)?'（枠 '+_frameOf(v)+'）':''}`});
+    ['wip','pcb'].forEach(kd=>out.push({id:kd+'_'+bk,kind:kd,board:bk,slot,trig:'ハードウェア構成表',label:`${kd==='wip'?'仕掛基板':'PCB'} ${_QT_SLOT[slot]} ${bk}`}));});
+  out.push({id:'assy',kind:'assy',trig:'構成表',label:`組立費${_frameOf(v)?'（枠 '+_frameOf(v)+'）':''}`});
   return out;
 }
 // 基板が初めて使われる機種か（同じ得意先・販売時期順）
@@ -42,7 +43,8 @@ function _qtRec(key,k){const m=state.quotes[key]=state.quotes[key]||{};return m[
 function _qtPeek(key,k){return ((state.quotes[key]||{})[k])||{};}
 
 // 期限の計算（構成表と同じ基準日を使う）
-function _qtKindOf(k){return k==='assy'?'assy':'mnt';}
+function _qtKindOf(k){return k==='assy'?'assy':k.split('_')[0];}
+function _qtBoardOf(k){const i=k.indexOf('_');return k==='assy'||i<0?'':k.slice(i+1);}
 function _qtDue(key,k){
   const r=_qtRules()[_qtKindOf(k)];const b=_csBaseDates(key);
   let sub='',basis='';
@@ -65,7 +67,7 @@ function _qtFrameChange(key){
 // 見積台帳から種類を判別した提出済み見積
 function _qtLedger(key,k){
   const m=_machineForKey(key);if(!m)return null;
-  const kind=QT_KINDS.find(x=>x.k===_qtKindOf(k));const bk=k.indexOf('mnt_')===0?k.slice(4):'';
+  const kind=QT_KINDS.find(x=>x.k===_qtKindOf(k));const bk=_qtBoardOf(k);
   return getEstimatesForMachine(m.id).find(e=>{const t=[e.memo,e.status,e.quoteNo,e.name,e.title].join(' ');
     return e.quoteSubmitted&&kind.re.test(t)&&(!bk||t.indexOf(bk)>=0);})||null;
 }
@@ -73,7 +75,7 @@ function _qtNeed(key,k){
   const r=_qtPeek(key,k);
   if(r.need)return {need:r.need,auto:false};
   if(k==='assy'){const f=_qtFrameChange(key);if(f)return {need:f.changed?'要':'不要',auto:true,why:f.changed?`枠が切り替わり（${f.prev.frame}→${f.frame}）`:`枠は前機種と同じ（${f.frame}）`};}
-  if(k.indexOf('mnt_')===0){const fb=_qtBoardFirst(key,k.slice(4));return fb.first?{need:'要',auto:true,why:'新規基板（この機種が初使用）'}:{need:'不要',auto:true,why:`既出の基板（${_dispKey(fb.prev)}で使用）`};}
+  if(_qtBoardOf(k)){const fb=_qtBoardFirst(key,_qtBoardOf(k));return fb.first?{need:'要',auto:true,why:'新規基板（この機種が初使用）'}:{need:'不要',auto:true,why:`既出の基板（${_dispKey(fb.prev)}で使用）`};}
   return {need:'',auto:true,why:'未判定'};
 }
 function _qtState(key,k){
@@ -113,7 +115,7 @@ function renderQuotes(){
   const list=rows.filter(pass).sort((a,b)=>String(a.sales||'9999').localeCompare(String(b.sales||'9999')));
   const fmt=v=>v?_e12(String(v).replace(/-/g,'/')):'<span class="same">—</span>';
   const itemRows=o=>o.st.map(c=>{const s=c.s;const on=`onclick="openQuoteEditor('${_e12(o.r.key)}','${c.x.id}')"`;
-    return `<tr><td class="name" style="padding-left:22px;">${_e12(c.x.label)}</td>
+    return `<tr><td class="name" style="padding-left:22px;">${_e12(c.x.label)}</td><td class="spec">${_e12(c.x.trig||'')}</td>
       <td class="c cs" ${on}>${_qtNeedSel(o.r.key,c.x.id,s.n)}</td>
       <td class="c cs" ${on}><span class="st ${s.cls}" style="padding:0 6px;">${_e12(s.label)}</span>${s.led&&s.led.url?` <a class="q" href="${_e12(s.led.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">📄</a>`:''}</td>
       <td class="c cs pt-cur" ${on}>${s.n.need==='不要'?'<span class="same">—</span>':fmt(s.d.sub)}</td>
@@ -136,12 +138,12 @@ function renderQuotes(){
         oninput="clearTimeout(window._qtT);window._qtT=setTimeout(()=>{_qtTerm=this.value;renderQuotes();const el=document.getElementById('qt-q');el.focus();el.setSelectionRange(el.value.length,el.value.length);},250)">
       <button class="btn btn-sm" onclick="_ptPrint('見積書 提出状況','qt-pt')">🖨 印刷</button>
       <button class="btn btn-sm" style="color:#16a34a;border-color:#16a34a;" onclick="_qtCsv()">📥 CSV</button></div>
-    <div class="pt-info">${list.length}機種（販売済み・量産終了は除く）。黄色が提出期限。「次の期限」は今の段取り（依頼→受領→作成→提出）の期限。見積項目はお客様のHW構成一覧表（基板構成）から自動作成：基板ごとの実装費＋組立費。実装費はその基板を初めて使う機種なら自動で「要」、組立費は前の機種と枠が違うと自動で「要」。見積台帳に登録された見積書は自動で提出済。セルをクリックで日付・委託先・URLを登録。</div>
+    <div class="pt-info">${list.length}機種（販売済み・量産終了は除く）。黄色が提出期限。「次の期限」は今の段取り（依頼→受領→作成→提出）の期限。見積項目はお客様提供資料から自動作成：ハードウェア構成表→基板ごとの仕掛基板・PCB見積、構成表→組立費見積。期限の基準日（出荷日・実装日）は生産計画（メール）から。仕掛基板・PCBはその基板を初めて使う機種なら自動で「要」、組立費は前の機種と枠が違うと自動で「要」。見積台帳に登録された見積書は自動で提出済。セルをクリックで日付・委託先・URLを登録。</div>
     <div class="pt-wrap" id="qt-pt"><table class="pt"><thead>
-      <tr><th rowspan="2">見積項目</th><th rowspan="2">要否</th><th rowspan="2">状態</th><th rowspan="2" class="pt-cur">提出期限</th><th rowspan="2">次の期限</th><th colspan="4">実施日</th></tr>
+      <tr><th rowspan="2">見積項目</th><th rowspan="2">トリガー資料</th><th rowspan="2">要否</th><th rowspan="2">状態</th><th rowspan="2" class="pt-cur">提出期限</th><th rowspan="2">次の期限</th><th colspan="4">実施日</th></tr>
       <tr>${QT_STEPS.map(st=>`<th>${st.label}</th>`).join('')}</tr></thead>
-      <tbody>${list.map(o=>`<tr class="pt-sec"><td colspan="9" style="background:#eef2f7;font-weight:700;cursor:pointer;" onclick="openMachineEditor('${_e12(o.r.key)}')">■ ${_e12(_dispKey(o.r.key))}　${_e12(o.title)}　<span style="font-weight:400;">枠 ${_e12(o.frame)||'—'}　販売 ${fmt(o.sales)}</span>${o.r.m?'<span class="pt-tag">登録</span>':''}</td></tr>${itemRows(o)}`).join('')
-        ||`<tr><td colspan="9" class="c same" style="padding:20px;">該当する機種がありません</td></tr>`}</tbody></table></div>
+      <tbody>${list.map(o=>`<tr class="pt-sec"><td colspan="10" style="background:#eef2f7;font-weight:700;cursor:pointer;" onclick="openMachineEditor('${_e12(o.r.key)}')">■ ${_e12(_dispKey(o.r.key))}　${_e12(o.title)}　<span style="font-weight:400;">枠 ${_e12(o.frame)||'—'}　販売 ${fmt(o.sales)}</span>${o.r.m?'<span class="pt-tag">登録</span>':''}</td></tr>${itemRows(o)}`).join('')
+        ||`<tr><td colspan="10" class="c same" style="padding:20px;">該当する機種がありません</td></tr>`}</tbody></table></div>
     <details style="margin-top:12px;"><summary style="cursor:pointer;font-size:13px;font-weight:700;padding:8px 12px;background:#fff;border:1px solid var(--border-light);border-radius:8px;">⚙️ 期限の計算ルール</summary>
       <div class="pt-info" style="margin-top:8px;">提出期限＝基準日のN日（前ならマイナス）。作成期限＝提出期限−作成日数、依頼期限＝作成期限−委託先の回答日数。</div>
       <div class="pt-wrap" style="max-height:none;"><table class="pt"><thead><tr><th>見積</th><th>提出期限の基準日</th><th>代替（基準日が無い場合）</th><th>作成日数</th><th>委託先の回答日数</th></tr></thead><tbody>${QT_KINDS.map(ruleRow).join('')}</tbody></table></div>
@@ -187,9 +189,9 @@ function saveQuoteEditor(key,k){
   saveToGAS();document.getElementById('qt-editor').remove();renderPage(currentPage);
 }
 function _qtCsv(){
-  const h=['機種','タイトル','販売時期','枠','見積項目','要否','状態','提出期限','依頼期限','依頼日','受領日','作成日','提出日','委託先'];const rows=[];
+  const h=['機種','タイトル','販売時期','枠','見積項目','トリガー資料','要否','状態','提出期限','依頼期限','依頼日','受領日','作成日','提出日','委託先'];const rows=[];
   _modelRows('active').filter(r=>!_csIsPast(r.key)).forEach(r=>{const v=r.db||{};
-    _qtItems(r.key).forEach(it=>{const s=_qtState(r.key,it.id);rows.push([_dispKey(r.key),v.title||'',v.salesDate||'',_frameOf(v),it.label,s.n.need,s.label,s.d.sub,s.d.req,s.r.req||'',s.r.recv||'',s.r.made||'',s.r.sub||s.subDate||'',s.r.vendor||'']);});});
+    _qtItems(r.key).forEach(it=>{const s=_qtState(r.key,it.id);rows.push([_dispKey(r.key),v.title||'',v.salesDate||'',_frameOf(v),it.label,it.trig||'',s.n.need,s.label,s.d.sub,s.d.req,s.r.req||'',s.r.recv||'',s.r.made||'',s.r.sub||s.subDate||'',s.r.vendor||'']);});});
   _ptCsvDownload('見積書提出状況',h,rows);
 }
 </script>

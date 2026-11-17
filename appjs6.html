@@ -121,7 +121,7 @@ function _rowKind(r){
 }
 
 /* ---------- 機種一覧（トップ） ---------- */
-let _homeStatus='', _homeTerm='', _homeScope='active', _homeKind='', _homeCsOnly=false, _homeRegOnly=false, _homeLimit=200;
+let _homeStatus='進行中', _homeTerm='', _homeScope='active', _homeKind='', _homeCsOnly=false, _homeRegOnly=false, _homeLimit=200;
 function _homeData(){
   const all=typeof _modelRows==='function'?_modelRows(_homeScope):MACHINES.map(m=>({key:m.id,m,db:null}));
   const alerts=getMilestoneAlerts();
@@ -137,6 +137,7 @@ function _homeData(){
   });
 }
 function renderHome(){
+  if(typeof _mtLoad==='function'&&!_mtLoaded&&!_mtLoading)_mtLoad(()=>{if(currentPage==='dashboard')renderHome();});
   if(typeof _loadModelDB==='function'&&!_mdbLoadStarted)_loadModelDB();
   if(typeof _renderCustSelect==='function')_renderCustSelect();
   const showC=_curCust()==='all';
@@ -164,7 +165,7 @@ function renderHome(){
   const openRow=d=>`openMachineEditor('${_e6(d.key)}')`;
   const fmt=v=>v?_e6(String(v).replace(/-/g,'/')):'<span class="same">—</span>';
   const BC=['M','D','DE','E','C'];
-  const NC=14+BC.length+(showC?1:0);
+  const NC=15+BC.length+(showC?1:0);
   const secOf=d=>(showC?_custName(d.cust)+' ／ ':'')+d.kind;
 
   let body='',last='';
@@ -174,6 +175,7 @@ function renderHome(){
       <td class="name">${_e6(_dispKey(d.key))}${d.m?'<span class="pt-tag">登録</span>':''}</td>${showC?`<td>${_e6(_custName(d.cust))}</td>`:''}
       <td class="spec" title="${_e6(d.title)}">${_e6(d.title)||'<span class="same">—</span>'}</td>
       <td>${_e6(d.person)||'<span class="same">—</span>'}</td>
+      <td class="c" onclick="event.stopPropagation()">${_compCell(d.key)}</td>
       <td class="c pt-cur">${fmt(d.due)}</td>
       <td class="c">${fmt(d.agg)}</td>
       <td class="num">${_e6(d.qty)||'<span class="same">—</span>'}</td>
@@ -231,7 +233,7 @@ function renderHome(){
       </div>
       <div class="pt-info">${showC?'すべての得意先':'<b>'+_e6(_custName(_curCust()))+'</b>'}：${list.length}機種（うち構成表の要依頼 <b style="color:#dc2626;">${list.filter(d=>d.csAlert).length}</b>）。黄色が販売時期（生産計画に無い登録機種は量産出荷日）。台数の * は定例打ち合わせの予測台数（中）。行クリック（または編集）で機種詳細設定を開き、タイトル・日程・基板などを入力できます。</div>
       <div class="pt-wrap" id="home-pt"><table class="pt"><thead>
-        <tr><th rowspan="2">機種</th>${showC?'<th rowspan="2">得意先</th>':''}<th rowspan="2">タイトル</th><th rowspan="2">担当</th>
+        <tr><th rowspan="2">機種</th>${showC?'<th rowspan="2">得意先</th>':''}<th rowspan="2">タイトル</th><th rowspan="2">担当</th><th rowspan="2" title="情報元: 営業情報（定例議事録）。適合済 → 量産構成表の依頼トリガー">適合</th>
           <th colspan="3">生産計画</th><th colspan="${BC.length+1}">枠・使用基板</th><th colspan="3">構成表</th>
           <th rowspan="2" title="業務フロー（機種開発～量産準備）で今ボールがある部署と工程">⚽ ボール</th><th rowspan="2">状態</th><th rowspan="2">進行</th><th rowspan="2"></th></tr>
         <tr><th class="pt-cur">販売時期</th><th>部品集約</th><th>台数</th><th>枠</th>${BC.map(c=>`<th>${c}</th>`).join('')}<th>量産準備用</th><th>見本機用</th><th>量産用</th></tr>

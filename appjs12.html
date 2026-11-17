@@ -128,7 +128,7 @@ function renderQuotes(){
     <td>${sel('qtr-'+x.k+'-fb',r.fb)} の <input id="qtr-${x.k}-fbOffset" type="number" value="${r.fbOffset}" style="width:56px;font-size:11px;"> 日</td>
     <td><input id="qtr-${x.k}-make" type="number" value="${r.make}" style="width:50px;font-size:11px;"> 日</td>
     <td><input id="qtr-${x.k}-lead" type="number" value="${r.lead}" style="width:50px;font-size:11px;"> 日</td></tr>`;};
-  document.getElementById('page-quotes').innerHTML=`
+  (document.getElementById(currentPage==='flow'?'fp-quotes':'page-quotes')||document.getElementById('page-quotes')).innerHTML=`
     <div class="pt-bar">
       ${_ptChip('⚠️ 期限超過・期限近い',rows.filter(isTodo).length,_qtFilter==='todo',"_qtFilter='todo';renderQuotes()")}
       ${_ptChip('未提出あり',rows.filter(isOpen).length,_qtFilter==='open',"_qtFilter='open';renderQuotes()")}
@@ -193,5 +193,24 @@ function _qtCsv(){
   _modelRows('active').filter(r=>!_csIsPast(r.key)).forEach(r=>{const v=r.db||{};
     _qtItems(r.key).forEach(it=>{const s=_qtState(r.key,it.id);rows.push([_dispKey(r.key),v.title||'',v.salesDate||'',_frameOf(v),it.label,it.trig||'',s.n.need,s.label,s.d.sub,s.d.req,s.r.req||'',s.r.recv||'',s.r.made||'',s.r.sub||s.subDate||'',s.r.vendor||'']);});});
   _ptCsvDownload('見積書提出状況',h,rows);
+}
+
+/* ---------- 適合（情報元: 営業情報＝定例議事録） ---------- */
+function _compOf(key){
+  let best=null;
+  ((typeof _mt!=='undefined'&&_mt.meetings)||[]).forEach(mt=>(mt.rows||[]).forEach(r=>{
+    if(r.kind==='machine'&&r.key===key&&(r.cat==='適合'||/適合/.test(r.text||''))&&(!best||mt.date>=best.date))best={date:mt.date,text:r.text};}));
+  if(best)return {ok:/適合済|適合.?(OK|ok|取得|完了|通過)/.test(best.text)&&!/未適合|不適合/.test(best.text),src:'営業情報 '+best.date,text:best.text};
+  const m=_machineForKey(key);const v=_mdbView(key)||{};const c=(m&&m.compliance)||v.complianceStatus||'';
+  if(c)return {ok:/適合|承認済/.test(c)&&!/申請中|未/.test(c),src:'機種データ',text:c};
+  return null;
+}
+function _compCell(key){
+  const c=_compOf(key);if(!c)return '<span class="same">—</span>';
+  if(!c.ok)return `<span class="st st-gray" style="padding:0 6px;" title="${_e12(c.src+': '+c.text)}">未</span>`;
+  const ms=((state.configSheets||{})[key]||{}).mass||{};
+  const trig=ms.got?'':ms.req?' <span class="st st-blue" style="padding:0 4px;font-size:9px;">量産表 依頼済</span>'
+    :` <a href="#" class="q" style="font-size:10px;" onclick="event.preventDefault();openCsEditor('${_e12(key)}','mass')">📑量産構成表を依頼</a>`;
+  return `<span class="st st-green" style="padding:0 6px;" title="${_e12(c.src+': '+c.text)}">適合済</span>${trig}`;
 }
 </script>

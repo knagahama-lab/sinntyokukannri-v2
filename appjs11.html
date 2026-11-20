@@ -231,7 +231,8 @@ function _fpClear(key,id){
 
 /* ---------- 画面 ---------- */
 function renderFlowPage(){
-  const tabs=`<div class="pt-bar">${[['ball','⚽ ボール位置（全機種）'],['progress','📈 フロー表（機種別）'],['quote','💴 見積書 提出確認'],['vendor','🔧 委託先フロー（従来）']].map(([k,l])=>`<button class="pt-chip${_fpTab===k?' on':''}" onclick="_fpTab='${k}';renderFlowPage()">${l}</button>`).join('')}</div>`;
+  const tabs=`<div class="pt-bar">${[['ball','⚽ ボール位置（全機種）'],['progress','📈 フロー表（機種別）'],['quote','💴 見積書 提出確認'],['gates','🚚 出荷・注文書ゲート'],['vendor','🔧 委託先フロー（従来）']].map(([k,l])=>`<button class="pt-chip${_fpTab===k?' on':''}" onclick="_fpTab='${k}';renderFlowPage()">${l}</button>`).join('')}</div>`;
+  if(_fpTab==='gates'){document.getElementById('page-flow').innerHTML=tabs+'<div id="fp-gates"></div>';renderGates();return;}
   if(_fpTab==='quote'){document.getElementById('page-flow').innerHTML=tabs+'<div class="pt-info">見積管理（見積台帳）と連携：台帳に登録された見積書は自動で「提出済」。作成に必要な委託先（依頼先）への仕入見積の依頼期限＝トリガーを管理します。</div><div id="fp-quotes"></div>';renderQuotes();return;}
   if(_fpTab==='vendor'){renderFlow();document.getElementById('page-flow').insertAdjacentHTML('afterbegin',tabs);return;}
   if(!_mdbLoadStarted&&typeof _loadModelDB==='function')_loadModelDB();

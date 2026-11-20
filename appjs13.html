@@ -1,0 +1,226 @@
+<script>
+/* ============================================================
+   出荷・注文書ゲート管理
+   出荷日（D日）から営業日で逆算：
+     仕入見積(原価見積)の依頼 → 見積書作成 → 商流確定・正式見積提出(D-7) → 注文書受領(D-3) → 未着アラート(D-2) → 出荷
+   見積台帳（見積管理システム）の「見積提出済」「注文書受領」を自動で反映。
+   ============================================================ */
+if(!state.shipGates)state.shipGates={};
+const GT_KINDS=['量産','見本','リユース','試作・単発','単価改定'];
+const GT_KIND_RE={'見本':/見本/,'リユース':/リユース|再生|中古|エコ/,'試作・単発':/試作|単発/,'単価改定':/改定|値上|値下/};
+const GT_CHANNELS=['サン電子','eD（イードリーム）','その他'];
+const GT_DEF={quote:7,po:3,alert:2,make:3,lead:10};
+let _gtFilter='todo',_gtTerm='';
+function _e13(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function _gtRules(){return Object.assign({},GT_DEF,(state.config&&state.config.gateRules)||{});}
+function _gtYmd(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function _gtToday(){return _gtYmd(new Date());}
+function _gtBiz(w){return w!==0&&w!==6;}
+// 営業日でn日ずらす（土日を除く。祝日は考慮しない）
+function _bizAdd(ds,n){
+  if(!ds)return '';const d=new Date(ds+'T00:00:00');if(isNaN(d))return '';
+  let k=Math.abs(n);const s=n<0?-1:1;
+  while(k>0){d.setDate(d.getDate()+s);if(_gtBiz(d.getDay()))k--;}
+  return _gtYmd(d);
+}
+// 今日から ds までの営業日数（過去ならマイナス）
+function _bizDiff(ds){
+  if(!ds)return null;const t=new Date(_gtToday()+'T00:00:00'),d=new Date(ds+'T00:00:00');if(isNaN(d))return null;
+  const s=d>=t?1:-1;let n=0;const c=new Date(t);let guard=0;
+  while(_gtYmd(c)!==_gtYmd(d)&&guard++<2000){c.setDate(c.getDate()+s);if(_gtBiz(c.getDay()))n+=s;}
+  return n;
+}
+function _gtRec(id){return state.shipGates[id]=state.shipGates[id]||{};}
+// 見積台帳から、この出荷（区分）に当たる見積・注文書を探す
+function _gtLedger(key,kind){
+  const code=String(key).split(':').pop();
+  const all=typeof getEstimatesForMachine==='function'?getEstimatesForMachine(code):[];
+  const txt=e=>[e.memo,e.status,e.quoteNo,e.name,e.title].join(' ');
+  const mine=all.filter(e=>{const t=txt(e);
+    if(kind==='量産')return !Object.values(GT_KIND_RE).some(re=>re.test(t));
+    return GT_KIND_RE[kind]?GT_KIND_RE[kind].test(t):false;});
+  return {quote:mine.find(e=>e.quoteSubmitted)||null,po:mine.find(e=>e.poReceived)||null};
+}
+// 見積画面（💴）の見積項目の進み具合
+function _gtQtProgress(key){
+  if(typeof _qtItems!=='function')return null;
+  const req=_qtItems(key).map(it=>({it,s:_qtState(key,it.id)})).filter(x=>x.s.n.need==='要');
+  if(!req.length)return null;
+  const open=req.filter(x=>x.s.label!=='提出済');
+  return {total:req.length,open:open.length,
+    reqDone:req.every(x=>x.s.label==='提出済'||x.s.r.req),madeDone:req.every(x=>x.s.label==='提出済'||x.s.r.made)};
+}
+function _gtMake(id,key,kind,ship,auto){
+  const R=_gtRules();const rec=state.shipGates[id]||{};
+  ship=rec.ship||ship;kind=rec.kind||kind;
+  const v=(typeof _mdbView==='function'?_mdbView(key):null)||{};
+  const led=_gtLedger(key,kind);
+  const qp=(kind==='量産'||kind==='見本')?_gtQtProgress(key):null;
+  const d={ship,alert:_bizAdd(ship,-R.alert),po:_bizAdd(ship,-R.po),quote:_bizAdd(ship,-R.quote)};
+  d.make=_bizAdd(d.quote,-R.make);d.req=_bizAdd(d.make,-R.lead);
+  const quoteDate=rec.quote||(led.quote?(led.quote.quoteDate||'台帳:提出済'):'');
+  const poDate=rec.po||(led.po?(led.po.poDate||'台帳:受領済'):'');
+  const reqDate=rec.req||(qp&&qp.reqDone?'見積画面で依頼済':'');
+  const madeDate=rec.made||(qp&&qp.madeDone?'見積画面で作成済':'');
+  const today=_gtToday();const bd=_bizDiff(ship);
+  const steps=[
+    {k:'req',label:'①仕入見積（原価見積）の依頼',due:d.req,done:quoteDate||reqDate},
+    {k:'make',label:'②見積書作成',due:d.make,done:quoteDate||madeDate},
+    {k:'quote',label:'③商流確定・正式見積提出',due:d.quote,done:quoteDate},
+    {k:'po',label:'④注文書受領',due:d.po,done:poDate},
+  ];
+  const next=steps.find(s=>!s.done);
+  let cls='st-blue',label='',act='';
+  if(poDate){cls='st-green';label='注文書受領済';}
+  else if(ship<today){cls='st-red';label='出荷済・注文書未着';act='至急 注文書を督促';}
+  else if(bd!=null&&bd<=R.alert){cls='st-red';label=`🚨 注文書未着（D-${bd}）`;act='客先へ即日督促／購買課へ事前連絡（出荷可否・仮伝票）';}
+  else if(bd!=null&&bd<=R.po){cls='st-red';label=`注文書 受領期限（D-${bd}）`;act='注文書の発行を客先へ確認';}
+  else if(next&&next.due&&next.due<today){cls='st-red';label=next.label.slice(1)+' 期限超過';act=next.label.slice(1);}
+  else if(next&&next.due&&_bizDiff(next.due)<=3){cls='st-yellow';label=next.label.slice(1)+' 期限近い';act=next.label.slice(1);}
+  else if(next){label=next.label.slice(1)+'待ち';act=next.label.slice(1);}
+  const hold=!poDate&&ship>=today&&bd!=null&&bd<=R.quote&&(!quoteDate||!rec.priceOk);
+  const caution=rec.caution!=null?!!rec.caution:kind!=='量産';
+  return {id,key,kind,ship,auto,rec,v,led,qp,d,steps,next,quoteDate,poDate,cls,label,act,hold,caution,bd,
+    channel:rec.channel||'',owner:rec.owner||((typeof _machineForKey==='function'&&_machineForKey(key))||{}).person||v.person||''};
+}
+function _gtList(){
+  const out=[];
+  (typeof _modelRows==='function'?_modelRows('active'):[]).forEach(r=>{const b=_csBaseDates(r.key);
+    if(b.sampleShip&&!(state.shipGates[r.key+'|sample']||{}).deleted)out.push(_gtMake(r.key+'|sample',r.key,'見本',b.sampleShip,true));
+    if(b.prodShip&&!(state.shipGates[r.key+'|prod']||{}).deleted)out.push(_gtMake(r.key+'|prod',r.key,'量産',b.prodShip,true));});
+  Object.entries(state.shipGates).forEach(([id,g])=>{if(g.manual&&!g.deleted&&g.key&&g.ship)out.push(_gtMake(id,g.key,g.kind||'その他',g.ship,false));});
+  return out.sort((a,b)=>String(a.ship).localeCompare(String(b.ship)));
+}
+// 今やること・メール用（出荷前の要対応）
+function _gtTodo(){
+  const today=_gtToday();
+  return _gtList().filter(g=>!g.poDate&&(g.cls==='st-red'||g.cls==='st-yellow'||g.hold)&&g.ship>=_bizAdd(today,-5));
+}
+// サーバーの日次メール用スナップショット（保存のたびに更新）
+function _gtSnapshot(){
+  return _gtList().filter(g=>!g.poDate&&g.ship>=_bizAdd(_gtToday(),-5)).map(g=>({key:g.key,code:String(g.key).split(':').pop(),disp:_dispKey(g.key),title:g.v.title||'',
+    kind:g.kind,ship:g.ship,quoteDue:g.d.quote,poDue:g.d.po,makeDue:g.d.make,reqDue:g.d.req,quoteDone:!!g.quoteDate,reqDone:!!g.steps[0].done,makeDone:!!g.steps[1].done,
+    priceOk:!!g.rec.priceOk,manualPo:!!g.rec.po,channel:g.channel,owner:g.owner}));
+}
+if(typeof saveToGAS==='function'&&!window._gtSaveWrapped){
+  window._gtSaveWrapped=true;const _orig=saveToGAS;
+  saveToGAS=function(){try{state.gateSnapshot=_gtSnapshot();}catch(e){}return _orig.apply(this,arguments);};
+}
+
+/* ---------- 画面 ---------- */
+function renderGates(){
+  if(typeof _mdbLoadStarted!=='undefined'&&!_mdbLoadStarted&&typeof _loadModelDB==='function')_loadModelDB();
+  const host=document.getElementById(currentPage==='flow'?'fp-gates':'page-gates')||document.getElementById('page-gates');if(!host)return;
+  const R=_gtRules();const today=_gtToday();const wk=_bizAdd(today,5);
+  const term=_gtTerm.trim().toLowerCase();
+  const all=_gtList().filter(g=>!term||(g.key+' '+(g.v.title||'')+' '+g.owner).toLowerCase().includes(term));
+  const F={
+    todo:g=>!g.poDate&&g.ship>=_bizAdd(today,-5)&&(g.cls==='st-red'||g.cls==='st-yellow'||g.hold),
+    week:g=>g.ship>=today&&g.ship<=wk,
+    nopo:g=>!g.poDate&&g.ship>=_bizAdd(today,-5)&&g.bd!=null&&g.bd<=R.po,
+    hold:g=>g.hold,
+    caution:g=>g.caution&&!g.poDate&&g.ship>=today,
+    open:g=>!g.poDate&&g.ship>=today,
+    all:()=>true};
+  const list=all.filter(F[_gtFilter]||F.all);
+  const fmt=v=>v?_e13(String(v).replace(/-/g,'/')):'<span class="same">—</span>';
+  const md=v=>v?_e13(String(v).slice(5).replace('-','/')):'—';
+  const stepCell=s=>{const late=!s.done&&s.due&&s.due<today;
+    return `<td class="c" style="${late?'background:#fee2e2;':''}"><div style="font-size:10px;color:var(--text-muted);">期限 ${md(s.due)}</div>${s.done?`<span class="st st-green" style="padding:0 5px;">✓ ${_e13(/^\d{4}-/.test(s.done)?md(s.done):s.done)}</span>`:late?'<span class="st st-red" style="padding:0 5px;">未</span>':'<span class="same">未</span>'}</td>`;};
+  const row=g=>`<tr class="click" onclick="openGateEditor('${_e13(g.id)}')">
+    <td class="c pt-cur" style="font-weight:700;">${fmt(g.ship)}<div style="font-size:10px;font-weight:400;">${g.bd!=null&&g.ship>=today?'あと'+g.bd+'営業日':''}</div></td>
+    <td class="name">${_e13(_dispKey(g.key))}${g.caution?'<span class="pt-tag" style="background:#fef3c7;color:#92400e;">要注意</span>':''}<div class="spec" style="font-size:10px;">${_e13(g.v.title||'')}</div></td>
+    <td class="c">${_e13(g.kind)}</td><td class="c">${_e13(g.channel)||'<span class="st st-yellow" style="padding:0 4px;">未確定</span>'}</td><td>${_e13(g.owner)||'<span class="same">—</span>'}</td>
+    ${g.steps.map(stepCell).join('')}
+    <td class="c">${g.rec.priceOk?'<span class="st st-green" style="padding:0 5px;">合意済</span>':'<span class="same">未</span>'}</td>
+    <td style="min-width:170px;"><span class="st ${g.cls}" style="padding:0 6px;">${_e13(g.label)}</span>${g.hold?' <span class="st st-red" style="padding:0 5px;">⛔ 出荷保留</span>':''}
+      ${g.act&&!g.poDate?`<div style="font-size:10px;margin-top:2px;">→ ${_e13(g.act)}</div>`:''}${g.qp&&g.qp.open?`<div style="font-size:10px;"><a href="#" class="q" onclick="event.preventDefault();event.stopPropagation();showPage('quotes')">💴 見積項目 未提出 ${g.qp.open}/${g.qp.total}</a></div>`:''}</td></tr>`;
+  const n=k=>all.filter(F[k]).length;
+  host.innerHTML=`
+    <div class="pt-bar">
+      ${_ptChip('⚠️ 要対応',n('todo'),_gtFilter==='todo',"_gtFilter='todo';renderGates()")}
+      ${_ptChip('🚨 注文書未着（D-'+R.po+'以内）',n('nopo'),_gtFilter==='nopo',"_gtFilter='nopo';renderGates()")}
+      ${_ptChip('⛔ 出荷保留',n('hold'),_gtFilter==='hold',"_gtFilter='hold';renderGates()")}
+      ${_ptChip('今週〜5営業日の出荷',n('week'),_gtFilter==='week',"_gtFilter='week';renderGates()")}
+      ${_ptChip('要注意案件',n('caution'),_gtFilter==='caution',"_gtFilter='caution';renderGates()")}
+      ${_ptChip('注文書待ち',n('open'),_gtFilter==='open',"_gtFilter='open';renderGates()")}
+      ${_ptChip('すべて',n('all'),_gtFilter==='all',"_gtFilter='all';renderGates()")}
+      <input id="gt-q" class="pt-in" style="flex:1;min-width:160px;" placeholder="機種・タイトル・担当で検索..." value="${_e13(_gtTerm)}"
+        oninput="clearTimeout(window._gtT);window._gtT=setTimeout(()=>{_gtTerm=this.value;renderGates();const el=document.getElementById('gt-q');el.focus();el.setSelectionRange(el.value.length,el.value.length);},250)">
+      <button class="btn btn-sm btn-primary" onclick="openGateEditor('')">＋ 出荷を追加</button>
+      <button class="btn btn-sm" onclick="_ptPrint('出荷・注文書ゲート','gt-pt')">🖨 印刷</button>
+      <button class="btn btn-sm" style="color:#16a34a;border-color:#16a34a;" onclick="_gtCsv()">📥 CSV</button></div>
+    <div class="pt-info">出荷日（D日）から<b>営業日</b>で逆算：①仕入見積の依頼（②の${R.lead}営業日前）→ ②見積書作成（③の${R.make}営業日前）→ ③商流確定・正式見積提出（D-${R.quote}）→ ④注文書受領（D-${R.po}）→ D-${R.alert}で未着なら督促・購買課へ事前連絡。
+      見本機・量産の出荷日はスケジュールから自動で行になります。リユース・試作・単価改定などは「＋ 出荷を追加」。見積台帳の見積提出・注文書受領は自動で反映。D-${R.quote}を過ぎて見積未提出または単価未合意なら「⛔ 出荷保留」。毎朝8時の日次メールに要対応の出荷を載せます。</div>
+    <div class="pt-wrap" id="gt-pt"><table class="pt"><thead>
+      <tr><th rowspan="2" class="pt-cur">出荷日（D）</th><th rowspan="2">機種</th><th rowspan="2">区分</th><th rowspan="2">商流</th><th rowspan="2">担当</th>
+        <th colspan="4">逆算スケジュール（期限 ／ 実施）</th><th rowspan="2">単価合意</th><th rowspan="2">状態 ／ 次の行動</th></tr>
+      <tr><th>①仕入見積 依頼</th><th>②見積書 作成</th><th>③見積提出 D-${R.quote}</th><th>④注文書 D-${R.po}</th></tr></thead>
+      <tbody>${list.map(row).join('')||'<tr><td colspan="11" class="c same" style="padding:20px;">該当する出荷がありません</td></tr>'}</tbody></table></div>
+    <details style="margin-top:12px;"><summary style="cursor:pointer;font-size:13px;font-weight:700;padding:8px 12px;background:#fff;border:1px solid var(--border-light);border-radius:8px;">⚙️ ゲートの日数（営業日）</summary>
+      <div class="pt-wrap" style="max-height:none;margin-top:8px;"><table class="pt"><thead><tr><th>ゲート</th><th>営業日</th></tr></thead><tbody>
+        ${[['quote','③商流確定・正式見積提出：出荷日の何営業日前'],['po','④注文書受領期限：出荷日の何営業日前'],['alert','未着アラート：出荷日の何営業日前'],['make','②見積書作成：見積提出の何営業日前'],['lead','①仕入見積の依頼：見積書作成の何営業日前（委託先の回答日数）']]
+          .map(([k,l])=>`<tr><td class="name">${l}</td><td><input id="gtr-${k}" type="number" value="${R[k]}" style="width:60px;font-size:11px;"> 営業日</td></tr>`).join('')}
+      </tbody></table></div>
+      <div style="margin-top:8px;"><button class="btn btn-primary btn-sm" onclick="saveGateRules()">💾 保存</button>
+        <button class="btn btn-sm" onclick="state.config.gateRules={};saveToGAS();renderGates();">初期値に戻す</button></div></details>`;
+}
+function saveGateRules(){
+  const o={};Object.keys(GT_DEF).forEach(k=>{o[k]=Math.max(0,+document.getElementById('gtr-'+k).value||0);});
+  state.config.gateRules=o;saveToGAS();showToast('✅ ゲートの日数を保存しました');renderGates();
+}
+function openGateEditor(id){
+  const isNew=!id;const g=isNew?null:_gtList().find(x=>x.id===id);
+  if(!isNew&&!g)return;
+  const rec=isNew?{}:g.rec;
+  const inp=(f,type,val,ph)=>`<input id="gte-${f}" type="${type}" value="${_e13(val||'')}" placeholder="${_e13(ph||'')}" class="me-in">`;
+  const sel=(f,opts,cur)=>`<select id="gte-${f}" class="me-in">${opts.map(o=>`<option${o===cur?' selected':''}>${_e13(o)}</option>`).join('')}</select>`;
+  const keys=(typeof _modelRows==='function'?_modelRows('active'):[]).map(r=>r.key);
+  const led=g?g.led:{};
+  _overlay('gt-editor',isNew?'🚚 出荷を追加':`🚚 ${_e13(_dispKey(g.key))} ${_e13(g.v.title||'')} — ${_e13(g.kind)}出荷 ${_e13(g.ship)}`,`
+    ${g?`<div class="pt-info">逆算期限：①仕入見積依頼 ${_e13(g.d.req)} ／ ②見積作成 ${_e13(g.d.make)} ／ ③見積提出 ${_e13(g.d.quote)} ／ ④注文書 ${_e13(g.d.po)} ／ 出荷 ${_e13(g.ship)}
+      ${led.quote?`<br>見積台帳：見積 ${_e13(led.quote.quoteNo||'')} ${_e13(led.quote.quoteDate||'')} ${led.quote.url?`<a class="q" href="${_e13(led.quote.url)}" target="_blank" rel="noopener">見積書</a>`:''}`:''}
+      ${led.po?`<br>見積台帳：注文書 ${_e13(led.po.orderNo||'')} ${_e13(led.po.poDate||'')} ${led.po.orderUrl?`<a class="q" href="${_e13(led.po.orderUrl)}" target="_blank" rel="noopener">注文書</a>`:''}`:''}</div>`:''}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      ${isNew?`<label class="me-f">機種<input id="gte-key" class="me-in" list="gte-keys" placeholder="例: A86"><datalist id="gte-keys">${keys.map(k=>`<option value="${_e13(k)}">`).join('')}</datalist></label>`:''}
+      <label class="me-f">出荷日（D日）${inp('ship','date',rec.ship||(g?g.ship:''))}</label>
+      <label class="me-f">区分${sel('kind',GT_KINDS,rec.kind||(g?g.kind:'リユース'))}</label>
+      <label class="me-f">商流（請求元）${sel('channel',['',...GT_CHANNELS],rec.channel||'')}</label>
+      <label class="me-f">営業担当${inp('owner','text',rec.owner||(g?g.owner:''),'例: 永浜')}</label>
+      <label class="me-f" style="flex-direction:row;align-items:center;gap:6px;"><input id="gte-priceOk" type="checkbox" ${rec.priceOk?'checked':''}> 単価合意済み（見積単価で客先合意）</label>
+      <label class="me-f" style="flex-direction:row;align-items:center;gap:6px;"><input id="gte-caution" type="checkbox" ${(g?g.caution:true)?'checked':''}> 要注意案件（客先マスタ未登録の可能性・購買課へ事前共有）</label>
+    </div>
+    <div class="pt-wrap" style="max-height:none;margin-top:10px;"><table class="pt"><thead><tr><th>段取り</th><th class="pt-cur">期限</th><th>実施日（手入力。空なら見積台帳・見積画面から自動）</th></tr></thead><tbody>
+      ${[['req','①仕入見積（原価見積）の依頼','req'],['made','②見積書作成','make'],['quote','③商流確定・正式見積提出','quote'],['po','④注文書受領','po']].map(([f,l,dk])=>`<tr><td class="name">${l}</td><td class="c pt-cur">${g?_e13(g.d[dk]):'—'}</td>
+        <td><input id="gte-${f}" type="date" class="me-in" value="${_e13(rec[f]||'')}"> <a href="#" class="q" style="font-size:11px;" onclick="event.preventDefault();document.getElementById('gte-${f}').value='${_gtToday()}'">今日</a></td></tr>`).join('')}
+    </tbody></table></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
+      <label class="me-f">注文番号${inp('poNo','text',rec.poNo,'')}</label>
+      <label class="me-f">購買課への連絡日（未着時）${inp('notice','date',rec.notice,'')}</label></div>
+    <label class="me-f" style="margin-top:10px;">メモ<textarea id="gte-memo" class="me-in" rows="2">${_e13(rec.memo||'')}</textarea></label>
+    <div style="display:flex;gap:6px;margin-top:12px;">${!isNew?`<button class="btn btn-sm" style="color:#dc2626;border-color:#dc2626;" onclick="deleteGate('${_e13(id)}')">${g.auto?'この出荷を一覧から外す':'削除'}</button>`:''}<span style="flex:1;"></span>
+      <button class="btn btn-sm" onclick="document.getElementById('gt-editor').remove()">キャンセル</button>
+      <button class="btn btn-primary btn-sm" onclick="saveGateEditor('${_e13(id)}')">💾 保存</button></div>`,640);
+}
+function saveGateEditor(id){
+  const g=f=>{const el=document.getElementById('gte-'+f);return el?(el.type==='checkbox'?el.checked:(el.value||'').trim()):'';};
+  if(!id){const key=g('key');const ship=g('ship');
+    if(!key||!ship){showToast('⚠️ 機種と出荷日を入力してください');return;}
+    id='gt'+Date.now();state.shipGates[id]={manual:true,key:(typeof _ikey==='function'&&!/:/.test(key)&&typeof _curCust==='function'&&_curCust()!=='all'?_ikey(key,_curCust()):key)};}
+  const r=_gtRec(id);
+  ['ship','kind','channel','owner','req','made','quote','po','poNo','notice','memo'].forEach(f=>r[f]=g(f));
+  r.priceOk=g('priceOk');r.caution=g('caution');
+  if(!r.manual){const base=_gtList().find(x=>x.id===id);if(base&&base.auto&&r.ship===_csBaseDates(base.key)[id.endsWith('|sample')?'sampleShip':'prodShip'])r.ship='';}
+  if(typeof addLog==='function')addLog(`🚚 出荷ゲート ${_dispKey(r.key||id.split('|')[0])} ${r.kind||''}: ${r.po?'注文書受領 '+r.po:r.quote?'見積提出 '+r.quote:'更新'}`);
+  saveToGAS();document.getElementById('gt-editor').remove();renderPage(currentPage);
+}
+function deleteGate(id){
+  if(!confirm('この出荷を一覧から外しますか？'))return;
+  _gtRec(id).deleted=true;saveToGAS();document.getElementById('gt-editor').remove();renderPage(currentPage);
+}
+function _gtCsv(){
+  const h=['出荷日','機種','タイトル','区分','商流','担当','①仕入見積依頼 期限','①実施','②見積作成 期限','②実施','③見積提出 期限','③実施','④注文書 期限','④実施','単価合意','状態','次の行動','出荷保留'];
+  const rows=_gtList().map(g=>[g.ship,_dispKey(g.key),g.v.title||'',g.kind,g.channel,g.owner,...g.steps.flatMap(s=>[s.due,s.done||'']),g.rec.priceOk?'合意済':'未',g.label,g.act,g.hold?'保留':'']);
+  _ptCsvDownload('出荷・注文書ゲート',h,rows);
+}
+</script>

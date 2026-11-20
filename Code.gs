@@ -115,7 +115,7 @@ function getPriceImpactData() {
  * 書かない(例: 'image/'+'*' のように分割する)。
  */
 function getAppBundle() {
-  var files = ['appjs1', 'appjs2', 'appjs3', 'appjs4', 'appjs5', 'appjs6', 'appjs7', 'appjs8', 'appjs9', 'appjs10', 'appjs11', 'appjs12'];
+  var files = ['appjs1', 'appjs2', 'appjs3', 'appjs4', 'appjs5', 'appjs6', 'appjs7', 'appjs8', 'appjs9', 'appjs10', 'appjs11', 'appjs12', 'appjs13'];
   var code = files.map(function(name) {
     var raw = HtmlService.createHtmlOutputFromFile(name).getContent();
     // 各ファイルは HtmlService.createHtmlOutputFromFile() が
@@ -1556,7 +1556,7 @@ function sendDailySummary() {
   MailApp.sendEmail({
     to: email,
     subject: '【営業進捗】日次サマリー ' + _fmtDate(new Date()),
-    htmlBody: _buildDailySummaryHtml(state),
+    htmlBody: _buildGateHtml(state) + _buildDailySummaryHtml(state),
   });
   Logger.log('日次サマリーメール送信: ' + email);
 }
@@ -1836,4 +1836,78 @@ function _checkMilestoneAlerts(state, alerts) {
     }
   });
   return alerts;
+}
+
+/* ============================================================
+ * 出荷・注文書ゲート：日次メールの要対応セクション
+ * 画面保存時の state.gateSnapshot を元に、見積台帳を読み直して最新の提出・受領を反映する
+ * ============================================================ */
+function _gtYmdJst(d) { return Utilities.formatDate(d, 'Asia/Tokyo', 'yyyy-MM-dd'); }
+function _gtBizDiffJst(ds) {
+  if (!ds) return null;
+  var t = new Date(_gtYmdJst(new Date()) + 'T00:00:00'), d = new Date(ds + 'T00:00:00');
+  if (isNaN(d.getTime())) return null;
+  var s = d >= t ? 1 : -1, n = 0, c = new Date(t), g = 0;
+  while (Utilities.formatDate(c, 'UTC', 'yyyy-MM-dd') !== Utilities.formatDate(d, 'UTC', 'yyyy-MM-dd') && g++ < 2000) {
+    c.setDate(c.getDate() + s); var w = c.getDay(); if (w !== 0 && w !== 6) n += s;
+  }
+  return n;
+}
+function _buildGateHtml(state) {
+  try {
+    var rows = (state && state.gateSnapshot) || [];
+    if (!rows.length) return '';
+    var cfg = state.config || {};
+    var R = { quote: 7, po: 3, alert: 2 };
+    var gr = cfg.gateRules || {}; ['quote', 'po', 'alert'].forEach(function(k) { if (gr[k] != null) R[k] = +gr[k]; });
+    var est = [];
+    if (cfg.linkageSheetId) {
+      var j = getLinkageDataFromSheet(cfg.linkageSheetId, cfg.linkageSheetName || '');
+      try { var o = JSON.parse(j); if (o && o.estimates) est = o.estimates; } catch (e) {}
+    }
+    var KRE = { '見本': /見本/, 'リユース': /リユース|再生|中古|エコ/, '試作・単発': /試作|単発/, '単価改定': /改定|値上|値下/ };
+    var today = _gtYmdJst(new Date());
+    var out = [];
+    rows.forEach(function(r) {
+      var mid = String(r.code || '').toUpperCase();
+      var mine = est.filter(function(e) {
+        var eid = String(e.id || e.machineId || '').trim().toUpperCase();
+        if (!(eid === mid || eid.indexOf(mid) === 0 || mid.indexOf(eid) === 0)) return false;
+        var t = [e.memo, e.status, e.quoteNo].join(' ');
+        if (r.kind === '量産') return !Object.keys(KRE).some(function(k) { return KRE[k].test(t); });
+        return KRE[r.kind] ? KRE[r.kind].test(t) : false;
+      });
+      var po = r.manualPo || mine.some(function(e) { return e.poReceived; });
+      if (po) return;
+      var quote = r.quoteDone || mine.some(function(e) { return e.quoteSubmitted; });
+      var bd = _gtBizDiffJst(r.ship);
+      var msg = '';
+      if (r.ship < today) msg = '出荷済・注文書未着 → 至急督促';
+      else if (bd != null && bd <= R.alert) msg = '🚨 注文書未着（D-' + bd + '）→ 客先へ即日督促／購買課へ事前連絡';
+      else if (bd != null && bd <= R.po) msg = '注文書 受領期限（D-' + bd + '）→ 客先へ発行確認';
+      else if (!quote && r.quoteDue && r.quoteDue <= today) msg = '見積未提出（提出期限 ' + r.quoteDue + '）';
+      else if (!quote && !r.makeDone && r.makeDue && _gtBizDiffJst(r.makeDue) <= 2) msg = '見積書作成 期限 ' + r.makeDue;
+      else if (!quote && !r.reqDone && r.reqDue && _gtBizDiffJst(r.reqDue) <= 2) msg = '仕入見積（原価見積）の依頼 期限 ' + r.reqDue;
+      if (!msg) return;
+      var hold = bd != null && bd <= R.quote && r.ship >= today && (!quote || !r.priceOk);
+      out.push({ r: r, msg: msg, hold: hold, bd: bd });
+    });
+    if (!out.length) return '';
+    var esc = function(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+    var tr = out.map(function(x) {
+      var r = x.r;
+      return '<tr><td style="border:1px solid #cbd5e1;padding:4px 6px;font-weight:700;">' + esc(r.ship) + '</td>' +
+        '<td style="border:1px solid #cbd5e1;padding:4px 6px;">' + esc(r.disp) + ' ' + esc(r.title) + '</td>' +
+        '<td style="border:1px solid #cbd5e1;padding:4px 6px;">' + esc(r.kind) + '</td>' +
+        '<td style="border:1px solid #cbd5e1;padding:4px 6px;">' + esc(r.channel || '未確定') + '</td>' +
+        '<td style="border:1px solid #cbd5e1;padding:4px 6px;">' + esc(r.owner) + '</td>' +
+        '<td style="border:1px solid #cbd5e1;padding:4px 6px;color:#b91c1c;">' + esc(x.msg) + (x.hold ? ' ⛔出荷保留' : '') + '</td></tr>';
+    }).join('');
+    return '<div style="font-family:sans-serif;margin-bottom:16px;"><h3 style="margin:0 0 6px;">🚚 出荷・注文書ゲート 要対応（' + out.length + '件）</h3>' +
+      '<table style="border-collapse:collapse;font-size:12px;"><tr style="background:#1e3a5f;color:#fff;"><th style="padding:4px 6px;">出荷日</th><th style="padding:4px 6px;">機種</th><th style="padding:4px 6px;">区分</th><th style="padding:4px 6px;">商流</th><th style="padding:4px 6px;">担当</th><th style="padding:4px 6px;">対応</th></tr>' +
+      tr + '</table></div>';
+  } catch (e) {
+    Logger.log('ゲートメール作成エラー: ' + e.message);
+    return '';
+  }
 }

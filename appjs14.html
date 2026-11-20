@@ -1,0 +1,77 @@
+<script>
+/* ============================================================
+   メニューの集約：サイドバーは5グループ＋設定、グループ内は画面上部のタブで切替
+   （各画面のIDとタブ設定〈表示・名前〉はそのまま使う）
+   ============================================================ */
+const NAV_GROUPS=[
+  {id:'machine',icon:'📋',label:'機種',pages:['dashboard','parts','boards','catalog','future']},
+  {id:'schedule',icon:'📅',label:'スケジュール',pages:['schedule']},
+  {id:'deal',icon:'📦',label:'手配・見積・出荷',pages:['csheets','quotes','gates','eco','priceimpact']},
+  {id:'progress',icon:'📈',label:'進捗・定例',pages:['flow','meetings']},
+  {id:'docs',icon:'📁',label:'資料一覧',pages:['docs']},
+  {id:'setting',icon:'⚙️',label:'設定・ログ',pages:['admin','log']},
+];
+const _navLast={};
+if(typeof _fpTab!=='undefined'&&(_fpTab==='quote'||_fpTab==='gates'))_fpTab='ball';
+try{Object.assign(_navLast,JSON.parse(localStorage.getItem('navLast')||'{}'));}catch(e){}
+function _navGroupOf(page){return NAV_GROUPS.find(g=>g.pages.includes(page));}
+function _navPageInfo(p){
+  const el=document.querySelector(`#nav-legacy .nav-item[data-page="${p}"]`);
+  const def=(typeof TAB_DEFS!=='undefined'?TAB_DEFS:[]).find(t=>t.id===p)||{};
+  const s=((state.config||{}).tabSettings||{})[p]||{};
+  const badge=el&&el.querySelector('.nav-badge');
+  return {id:p,
+    label:(el&&el.querySelector('.nav-item-label')?el.querySelector('.nav-item-label').textContent:'')||def.defaultLabel||p,
+    icon:(el&&el.querySelector('.nav-item-icon')?el.querySelector('.nav-item-icon').textContent:'')||def.icon||'',
+    hidden:!!(s.hidden&&!def.required),
+    badge:badge&&badge.textContent&&badge.textContent!=='0'&&badge.style.display!=='none'?badge.textContent:''};
+}
+function _navVisible(g){return g.pages.filter(p=>!_navPageInfo(p).hidden&&document.getElementById('page-'+p));}
+function renderNavGroups(){
+  const box=document.getElementById('nav-groups');if(!box)return;
+  const cur=typeof currentPage!=='undefined'?currentPage:'dashboard';
+  box.innerHTML=NAV_GROUPS.map(g=>{const vis=_navVisible(g);if(!vis.length)return '';
+    const badges=vis.map(p=>_navPageInfo(p).badge).filter(Boolean);
+    return `<div class="nav-item${g.pages.includes(cur)?' active':''}" data-group="${g.id}" onclick="openNavGroup('${g.id}')" title="${vis.map(p=>_navPageInfo(p).label).join('・')}">
+      <span class="nav-item-icon">${g.icon}</span><span class="nav-item-label">${g.label}</span>
+      ${badges.length?`<span class="nav-badge-wrap"><span class="nav-badge">${badges[0]}</span></span>`:''}</div>`;}).join('');
+}
+function openNavGroup(gid){
+  const g=NAV_GROUPS.find(x=>x.id===gid);if(!g)return;
+  const vis=_navVisible(g);const p=vis.includes(_navLast[gid])?_navLast[gid]:vis[0];
+  if(p)showPage(p);
+}
+function renderSubtabs(){
+  const bar=document.getElementById('subtabs');if(!bar)return;
+  const cur=typeof currentPage!=='undefined'?currentPage:'dashboard';
+  const g=_navGroupOf(cur);const vis=g?_navVisible(g):[];
+  if(!g||vis.length<2){bar.innerHTML='';bar.style.display='none';return;}
+  bar.style.display='';
+  bar.innerHTML=vis.map(p=>{const i=_navPageInfo(p);
+    return `<button class="subtab${p===cur?' on':''}" onclick="showPage('${p}')">${i.icon} ${i.label}${i.badge?` <b class="subtab-badge">${i.badge}</b>`:''}</button>`;}).join('');
+}
+if(typeof showPage==='function'&&!window._navWrapped){
+  window._navWrapped=true;const _sp=showPage;
+  showPage=function(page){
+    const r=_sp.apply(this,arguments);
+    const g=_navGroupOf(page);if(g){_navLast[g.id]=page;try{localStorage.setItem('navLast',JSON.stringify(_navLast));}catch(e){}}
+    renderNavGroups();renderSubtabs();return r;
+  };
+}
+if(typeof applyTabSettings==='function'&&!window._navTabWrapped){
+  window._navTabWrapped=true;const _at=applyTabSettings;
+  applyTabSettings=function(){const r=_at.apply(this,arguments);renderNavGroups();renderSubtabs();return r;};
+}
+(function(){
+  const css=document.createElement('style');
+  css.textContent=`#subtabs{display:flex;gap:4px;flex-wrap:wrap;padding:8px 24px 0;background:var(--card);border-bottom:1px solid var(--border);position:sticky;top:56px;z-index:49;}
+  .subtab{border:none;background:none;padding:8px 14px;font-size:13px;font-weight:600;color:var(--text-sub);border-bottom:3px solid transparent;cursor:pointer;font-family:inherit;}
+  .subtab:hover{color:var(--text);}
+  .subtab.on{color:var(--primary,#2563eb);border-bottom-color:var(--primary,#2563eb);}
+  .subtab-badge{background:#dc2626;color:#fff;border-radius:9px;padding:0 6px;font-size:10px;}`;
+  document.head.appendChild(css);
+  renderNavGroups();renderSubtabs();
+  // バッジ（エコ・将来機種）は後から更新されるので定期的に反映
+  setInterval(()=>{try{renderNavGroups();if(document.querySelector('#subtabs .subtab-badge')||document.getElementById('subtabs').children.length)renderSubtabs();}catch(e){}},5000);
+})();
+</script>

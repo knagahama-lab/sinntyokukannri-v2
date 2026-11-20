@@ -23,7 +23,9 @@
     </div>
     <div class="sidebar-nav">
       <div class="sidebar-section-label">メインメニュー</div>
-      <div class="nav-item active" data-page="dashboard"><span class="nav-item-icon">📋</span><span class="nav-item-label">機種一覧</span></div>
+      <div id="nav-groups"></div>
+      <div id="nav-legacy" style="display:none;">
+      <div class="nav-item" data-page="dashboard"><span class="nav-item-icon">📋</span><span class="nav-item-label">機種一覧</span></div>
       <div class="nav-item" data-page="schedule"><span class="nav-item-icon">📅</span><span class="nav-item-label">スケジュール</span></div>
       <div class="nav-item" data-page="csheets"><span class="nav-item-icon">📑</span><span class="nav-item-label">構成表</span></div>
       <div class="nav-item" data-page="quotes"><span class="nav-item-icon">💴</span><span class="nav-item-label">見積</span></div>
@@ -31,7 +33,7 @@
       <div class="nav-item" data-page="meetings"><span class="nav-item-icon">📝</span><span class="nav-item-label">定例・TODO</span></div>
       <div class="nav-item" data-page="flow"><span class="nav-item-icon">📈</span><span class="nav-item-label">進捗状況</span></div>
       <div class="nav-item" data-page="docs"><span class="nav-item-icon">📁</span><span class="nav-item-label">資料一覧</span></div>
-      <div class="nav-item nav-more-toggle" onclick="toggleNavMore()"><span class="nav-item-icon">📂</span><span class="nav-item-label">その他</span><span id="nav-more-arrow" style="margin-left:auto;font-size:10px;opacity:.7;">▸</span></div>
+      
       <div id="nav-more" style="display:none;padding-left:8px;">
         <div class="nav-item" data-page="parts"><span class="nav-item-icon">🧩</span><span class="nav-item-label">機種管理</span></div>
         <div class="nav-item" data-page="boards"><span class="nav-item-icon">🔧</span><span class="nav-item-label">基板管理</span></div>
@@ -41,6 +43,7 @@
         <div class="nav-item" data-page="future"><span class="nav-item-icon">🔭</span><span class="nav-item-label">将来機種計画</span><span class="nav-badge-wrap"><span class="nav-badge" id="future-badge" style="background:var(--info);">0</span></span></div>
         <div class="nav-item" data-page="admin"><span class="nav-item-icon">⚙️</span><span class="nav-item-label">管理コンソール</span></div>
         <div class="nav-item" data-page="log"><span class="nav-item-icon">📝</span><span class="nav-item-label">更新ログ</span></div>
+      </div>
       </div>
     </div>
     <div class="sidebar-footer">
@@ -72,6 +75,7 @@
         </div>
       </div>
     </div>
+    <div id="subtabs"></div>
     <div id="content">
       <div id="page-dashboard" class="page active"></div>
       <div id="page-schedule" class="page"></div>
@@ -732,5 +736,6 @@
 <?!= include('appjs11'); ?>
 <?!= include('appjs12'); ?>
 <?!= include('appjs13'); ?>
+<?!= include('appjs14'); ?>
 </body>
 </html>

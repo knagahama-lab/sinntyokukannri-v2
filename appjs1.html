@@ -203,7 +203,7 @@ function saveToGAS(alertDesc,alertMachineId){
 ============================================================ */
 let currentPage='dashboard';
 const PAGE_TITLES={
-  dashboard:'機種一覧',schedule:'スケジュール',docs:'資料一覧',csheets:'構成表',quotes:'見積書 提出状況',gates:'出荷・注文書ゲート',meetings:'定例・TODO',
+  dashboard:'機種一覧',schedule:'スケジュール',docs:'資料一覧',csheets:'構成表',quotes:'見積書 提出状況',gates:'出荷・注文書ゲート',cockpit:'統合管理（機種カルテ）',meetings:'定例・TODO',
   eco:'エコフロー管理',flow:'進捗状況（業務フロー）',admin:'管理コンソール',log:'更新ログ',
   parts:'機種管理',boards:'基板管理',
   priceimpact:'値上げインパクト',catalog:'製品図鑑',future:'将来機種計画',
@@ -546,6 +546,7 @@ function setupDailyTrigger(){
    TAB (SIDEBAR) MANAGEMENT
 ============================================================ */
 const TAB_DEFS=[
+  {id:'cockpit',  icon:'🎯',defaultLabel:'統合管理',section:'main'},
   {id:'dashboard',icon:'📋',defaultLabel:'機種一覧',section:'main',required:true},
   {id:'schedule', icon:'📅',defaultLabel:'スケジュール',  section:'main'},
   {id:'csheets',  icon:'📑',defaultLabel:'構成表',        section:'main'},

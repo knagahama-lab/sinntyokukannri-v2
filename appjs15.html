@@ -1,0 +1,137 @@
+<script>
+/* ============================================================
+   統合管理（機種コックピット）
+   1機種＝1行で 適合・構成表・見積・出荷/注文書・業務フロー・TODO を一覧。
+   行を選ぶと右側に機種カルテ（全項目をその場で更新）。
+   ============================================================ */
+let _ckSel='', _ckFilter='todo', _ckTerm='';
+function _e15(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+const _ckFmt=v=>v?_e15(String(v).replace(/-/g,'/')):'<span class="same">—</span>';
+const _ckMd=v=>v?_e15(String(v).slice(5).replace('-','/')):'—';
+function _ckTodos(key){return ((typeof _mt!=='undefined'&&_mt.todos)||[]).filter(t=>t.key===key&&!t.done);}
+function _ckGates(key){return typeof _gtList==='function'?_gtList().filter(g=>g.key===key):[];}
+// 機種ごとの「やること」を全機能から集める（赤=2, 黄=1）
+function _ckActions(key){
+  const a=[];const k=_e15(key);
+  if(typeof CS_KINDS!=='undefined')CS_KINDS.forEach(x=>{const s=_csState(key,x.k);
+    if(s.cls==='st-red'||s.cls==='st-yellow')a.push({lvl:s.cls==='st-red'?2:1,due:s.due||'',txt:`📑 ${x.label}構成表 ${s.label}`,act:`openCsEditor('${k}','${x.k}')`});});
+  if(typeof _qtItems==='function')_qtItems(key).forEach(it=>{const s=_qtState(key,it.id);
+    if(s.n.need==='要'&&(s.cls==='st-red'||s.cls==='st-yellow'))a.push({lvl:s.cls==='st-red'?2:1,due:s.stepDue||'',txt:`💴 ${it.label}：${s.label}`,act:`openQuoteEditor('${k}','${it.id}')`});});
+  _ckGates(key).forEach(g=>{if(!g.poDate&&(g.cls==='st-red'||g.cls==='st-yellow'||g.hold))
+    a.push({lvl:g.cls==='st-red'||g.hold?2:1,due:(g.next&&g.next.due)||g.ship,txt:`🚚 ${g.kind}出荷${_ckMd(g.ship)}：${g.hold&&g.cls!=='st-red'?'⛔ 出荷保留':g.label}`,act:`openGateEditor('${_e15(g.id)}')`});});
+  _ckTodos(key).forEach(t=>{if(t.due&&t.due<=_addDays(_todayStr(),7))a.push({lvl:t.due<_todayStr()?2:1,due:t.due,txt:`📝 ${t.text.slice(0,30)}`,act:`_ckSelect('${k}')`});});
+  if(typeof _compOf==='function'){const c=_compOf(key);const ms=((state.configSheets||{})[key]||{}).mass||{};
+    if(c&&c.ok&&!ms.req&&!ms.got)a.push({lvl:2,due:'',txt:'📑 適合済 → 量産構成表を依頼',act:`openCsEditor('${k}','mass')`});}
+  return a.sort((x,y)=>y.lvl-x.lvl||String(x.due||'9999').localeCompare(String(y.due||'9999')));
+}
+function renderCockpit(){
+  if(typeof _mdbLoadStarted!=='undefined'&&!_mdbLoadStarted&&typeof _loadModelDB==='function')_loadModelDB();
+  if(typeof _mtLoad==='function'&&!_mtLoaded&&!_mtLoading)_mtLoad(()=>{if(currentPage==='cockpit')renderCockpit();});
+  const host=document.getElementById('page-cockpit');if(!host)return;
+  const term=_ckTerm.trim().toLowerCase();
+  const rows=(typeof _modelRows==='function'?_modelRows('active'):[]).filter(r=>!_csIsPast(r.key)).map(r=>{
+    const v=r.db||_mdbView(r.key)||{};const acts=_ckActions(r.key);
+    return {r,key:r.key,v,acts,lvl:acts.length?acts[0].lvl:0,person:(r.m&&r.m.person)||v.person||'',sales:v.salesDate||(v.longlead||{}).deliveryDate||''};})
+    .filter(o=>!term||(o.key+' '+(o.v.title||'')+' '+o.person).toLowerCase().includes(term));
+  const F={todo:o=>o.lvl>0,red:o=>o.lvl===2,all:()=>true};
+  const list=rows.filter(F[_ckFilter]||F.all).sort((a,b)=>b.lvl-a.lvl||String(a.sales||'9999').localeCompare(String(b.sales||'9999')));
+  if(!_ckSel&&list.length)_ckSel=list[0].key;
+  const qtCell=key=>{if(typeof _qtItems!=='function')return '';
+    const req=_qtItems(key).map(it=>({it,s:_qtState(key,it.id)})).filter(x=>x.s.n.need==='要');
+    if(!req.length)return '<span class="same">—</span>';
+    const done=req.filter(x=>x.s.label==='提出済').length;const worst=req.find(x=>x.s.cls==='st-red')||req.find(x=>x.s.cls==='st-yellow');
+    return `<span class="st ${done===req.length?'st-green':worst?worst.s.cls:'st-blue'}" style="padding:0 6px;">${done}/${req.length} 提出</span>`;};
+  const gtCell=key=>_ckGates(key).filter(g=>g.ship>=_addDays(_todayStr(),-7)).map(g=>`<span class="st ${g.hold&&g.cls!=='st-red'?'st-red':g.cls}" style="padding:0 5px;margin:1px;cursor:pointer;" title="${_e15(g.label)}" onclick="event.stopPropagation();openGateEditor('${_e15(g.id)}')">${g.kind==='量産'?'量':g.kind==='見本'?'見':g.kind.slice(0,1)} ${_ckMd(g.ship)}${g.poDate?' ✓':''}</span>`).join('')||'<span class="same">—</span>';
+  const ballCell=key=>{if(typeof _fpSummary!=='function')return '';const b=_fpSummary(key);
+    return b.ball.step?`<span style="font-size:11px;" title="${_e15(b.ball.step.label)}">⚽ ${_e15(_fpLaneName(b.ball.step))}<br><span class="same">${b.pct}%</span></span>`:'<span class="st st-green" style="padding:0 5px;">完了</span>';};
+  const row=o=>{const k=_e15(o.key);
+    return `<tr class="click${o.key===_ckSel?' ck-sel':''}" onclick="_ckSelect('${k}')">
+      <td class="c pt-cur">${_ckFmt(o.sales)}</td>
+      <td class="name">${_e15(_dispKey(o.key))}<div class="spec" style="font-size:10px;max-width:140px;">${_e15(o.v.title||'')}</div></td>
+      <td>${_e15(o.person)||'<span class="same">—</span>'}</td>
+      <td class="c" onclick="event.stopPropagation()">${typeof _compCell==='function'?_compCell(o.key):''}</td>
+      <td class="c" onclick="event.stopPropagation()">${typeof _csChips==='function'?_csChips(o.key):''}</td>
+      <td class="c">${qtCell(o.key)}</td>
+      <td class="c" style="min-width:110px;">${gtCell(o.key)}</td>
+      <td>${ballCell(o.key)}</td>
+      <td class="c">${_ckTodos(o.key).length||'<span class="same">0</span>'}</td>
+      <td style="min-width:200px;">${o.acts.slice(0,2).map(x=>`<a href="#" class="q" style="display:block;font-size:11px;color:${x.lvl===2?'#b91c1c':'#92400e'};" onclick="event.preventDefault();event.stopPropagation();${x.act}">${x.lvl===2?'🔴':'🟡'} ${_e15(x.txt)}${x.due?'（'+_ckMd(x.due)+'）':''}</a>`).join('')}${o.acts.length>2?`<span class="same" style="font-size:10px;">ほか${o.acts.length-2}件</span>`:''}${!o.acts.length?'<span class="same">—</span>':''}</td></tr>`;};
+  const n=k=>rows.filter(F[k]).length;
+  host.innerHTML=`
+    <div class="pt-bar">
+      ${_ptChip('⚠️ 要対応',n('todo'),_ckFilter==='todo',"_ckFilter='todo';renderCockpit()")}
+      ${_ptChip('🔴 期限超過・緊急',n('red'),_ckFilter==='red',"_ckFilter='red';renderCockpit()")}
+      ${_ptChip('進行中すべて',n('all'),_ckFilter==='all',"_ckFilter='all';renderCockpit()")}
+      <input id="ck-q" class="pt-in" style="flex:1;min-width:160px;" placeholder="機種・タイトル・担当で検索..." value="${_e15(_ckTerm)}"
+        oninput="clearTimeout(window._ckT);window._ckT=setTimeout(()=>{_ckTerm=this.value;renderCockpit();const el=document.getElementById('ck-q');el.focus();el.setSelectionRange(el.value.length,el.value.length);},250)">
+    </div>
+    <div class="pt-info">1機種＝1行で全機能の状況を表示（構成表は 準=量産準備用・見=見本機用・量=量産用、出荷は 見=見本機・量=量産）。「次にやること」は全機能から期限の近い順。行を選ぶと右の機種カルテで、構成表・見積・出荷/注文書・TODO をその場で更新できます。</div>
+    <div class="ck-wrap">
+      <div class="pt-wrap ck-list"><table class="pt"><thead><tr>
+        <th class="pt-cur">販売時期</th><th>機種</th><th>担当</th><th>適合</th><th>構成表</th><th>見積</th><th>出荷・注文書</th><th>業務フロー</th><th>TODO</th><th>次にやること</th></tr></thead>
+        <tbody>${list.map(row).join('')||'<tr><td colspan="10" class="c same" style="padding:20px;">該当する機種がありません</td></tr>'}</tbody></table></div>
+      <aside class="ck-panel" id="ck-panel">${_ckSel?_ckPanel(_ckSel):'<div class="same" style="padding:20px;">機種を選んでください</div>'}</aside>
+    </div>`;
+}
+function _ckSelect(key){_ckSel=key;renderCockpit();}
+function _ckPanel(key){
+  const k=_e15(key);const v=_mdbView(key)||{};const m=_machineForKey(key);
+  const b=typeof _rowBoards==='function'?_rowBoards({key,m,db:v}):{};
+  const sec=(t,body,btn)=>`<div class="ck-sec"><div class="ck-sec-h">${t}${btn?`<span style="flex:1;"></span>${btn}`:''}</div>${body}</div>`;
+  const acts=_ckActions(key);
+  const cs=typeof CS_KINDS!=='undefined'?`<table class="pt"><thead><tr><th>構成表</th><th>状態</th><th class="pt-cur">依頼期限</th><th></th></tr></thead><tbody>${CS_KINDS.map(x=>{const s=_csState(key,x.k);
+    return `<tr><td class="name">${x.label}</td><td class="c">${_csSelect(key,x.k,s)}</td><td class="c pt-cur">${_ckFmt(s.due)}</td><td class="c"><button class="btn btn-sm" style="padding:0 6px;" onclick="openCsEditor('${k}','${x.k}')">詳細</button></td></tr>`;}).join('')}</tbody></table>`:'';
+  const qt=typeof _qtItems==='function'?`<table class="pt"><thead><tr><th>見積項目</th><th>要否</th><th>状態</th><th class="pt-cur">提出期限</th><th>次の期限</th></tr></thead><tbody>${_qtItems(key).map(it=>{const s=_qtState(key,it.id);
+    return `<tr class="click" onclick="openQuoteEditor('${k}','${it.id}')"><td class="name" style="font-size:11px;">${_e15(it.label)}</td><td class="c">${_qtNeedSel(key,it.id,s.n)}</td>
+      <td class="c"><span class="st ${s.cls}" style="padding:0 5px;">${_e15(s.label)}</span></td><td class="c pt-cur">${s.n.need==='不要'?'—':_ckFmt(s.d.sub)}</td><td class="c">${s.n.need==='要'&&s.stepDue&&s.label!=='提出済'?_ckFmt(s.stepDue):'—'}</td></tr>`;}).join('')}</tbody></table>`:'';
+  const gates=_ckGates(key);
+  const gt=`<table class="pt"><thead><tr><th class="pt-cur">出荷日</th><th>区分</th><th>①依頼</th><th>②作成</th><th>③見積</th><th>④注文書</th><th>状態</th></tr></thead><tbody>${gates.map(g=>`<tr class="click" onclick="openGateEditor('${_e15(g.id)}')">
+      <td class="c pt-cur">${_ckFmt(g.ship)}</td><td class="c">${_e15(g.kind)}</td>
+      ${g.steps.map(s=>`<td class="c" style="font-size:10px;${!s.done&&s.due&&s.due<_todayStr()?'background:#fee2e2;':''}">${s.done?'✓':_ckMd(s.due)}</td>`).join('')}
+      <td><span class="st ${g.hold&&g.cls!=='st-red'?'st-red':g.cls}" style="padding:0 5px;font-size:10px;">${_e15(g.hold&&g.cls!=='st-red'?'⛔ 出荷保留':g.label)}</span></td></tr>`).join('')||'<tr><td colspan="7" class="c same">出荷日が未登録（スケジュールに見本機・量産出荷日を入れると自動で出ます）</td></tr>'}</tbody></table>`;
+  const todos=_ckTodos(key);
+  const td=`${todos.map(t=>`<label style="display:flex;gap:6px;align-items:flex-start;font-size:12px;padding:3px 0;border-bottom:1px dashed var(--border-light);">
+      <input type="checkbox" onchange="_ckTodoDone('${_e15(t.id)}')"><span style="flex:1;">${_e15(t.text)}</span><span class="${t.due&&t.due<_todayStr()?'st st-red':'same'}" style="padding:0 4px;font-size:10px;">${_ckMd(t.due)}</span></label>`).join('')||'<div class="same" style="font-size:12px;">未完了のTODOはありません</div>'}
+    <div style="display:flex;gap:4px;margin-top:6px;"><input id="ck-td-text" class="pt-in" style="flex:1;" placeholder="TODOを追加..."><input id="ck-td-due" type="date" class="pt-in" style="width:130px;"><button class="btn btn-sm btn-primary" onclick="_ckAddTodo('${k}')">追加</button></div>`;
+  const fp=typeof _fpSummary==='function'?(()=>{const s=_fpSummary(key);return `<div style="font-size:12px;">${s.done}/${s.total} 工程完了（${s.pct}%）${s.ball.step?`　⚽ <b>${_e15(_fpLaneName(s.ball.step))}</b>：<a href="#" class="q" onclick="event.preventDefault();openStepDetail('${k}','${s.ball.step.id}')">${_e15(s.ball.step.label)}</a>`:''}</div>`;})():'';
+  return `<div class="ck-head"><div style="font-size:16px;font-weight:800;">${_e15(_dispKey(key))} <span style="font-size:12px;font-weight:600;">${_e15(v.title||'')}</span></div>
+      <div style="font-size:11px;color:var(--text-sub);margin-top:2px;">販売 ${_ckFmt(v.salesDate)}　台数 ${_e15((v.forecast&&v.forecast.mid)||v.salesQty||(m&&m.prodQty)||'—')}　枠 ${_e15((typeof _frameOf==='function'?_frameOf(v):'')||'—')}　担当 ${_e15((m&&m.person)||v.person||'—')}</div>
+      <div style="font-size:11px;margin-top:2px;">${['M','D','DE','E','C'].filter(c=>b[c]).map(c=>`<span class="pt-tag" style="margin-left:0;margin-right:3px;">${c} ${_e15(b[c])}</span>`).join('')}</div>
+      <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap;"><button class="btn btn-sm" onclick="openMachineEditor('${k}')">✏️ 機種詳細</button>${typeof _compCell==='function'?`<span style="font-size:11px;align-self:center;">適合：${_compCell(key)}</span>`:''}</div></div>
+    ${acts.length?sec(`🔔 次にやること（${acts.length}）`,acts.map(x=>`<a href="#" class="q" style="display:block;font-size:12px;padding:2px 0;color:${x.lvl===2?'#b91c1c':'#92400e'};" onclick="event.preventDefault();${x.act}">${x.lvl===2?'🔴':'🟡'} ${_e15(x.txt)}${x.due?'（'+_ckMd(x.due)+'）':''}</a>`).join('')):''}
+    ${sec('🚚 出荷・注文書',gt,`<button class="btn btn-sm" style="padding:0 6px;" onclick="openGateEditor('');setTimeout(()=>{const e=document.getElementById('gte-key');if(e)e.value='${k}';},50)">＋ 出荷</button>`)}
+    ${sec('💴 見積',qt)}
+    ${sec('📑 構成表',cs)}
+    ${sec(`📝 TODO（${todos.length}）`,td)}
+    ${sec('📈 業務フロー',fp)}`;
+}
+function _ckTodoDone(id){
+  const t=(_mt.todos||[]).find(x=>x.id===id);if(!t)return;
+  t.done=true;t.doneAt=_todayStr();t.updatedAt=typeof _nowIso==='function'?_nowIso():new Date().toISOString();
+  if(typeof _mtSave==='function')_mtSave();showToast('✅ TODOを完了にしました');renderCockpit();
+}
+function _ckAddTodo(key){
+  const text=(document.getElementById('ck-td-text').value||'').trim();if(!text)return;
+  const due=document.getElementById('ck-td-due').value||'';
+  _mt.todos.push({id:'td'+Date.now()+Math.random().toString(36).slice(2,6),text,key,topic:'',customer:typeof _keyCust==='function'?_keyCust(key):'',due,owner:'',done:false,created:_todayStr(),meetingId:'',updatedAt:typeof _nowIso==='function'?_nowIso():new Date().toISOString()});
+  if(typeof _mtSave==='function')_mtSave();renderCockpit();
+}
+// 他の画面の部品（プルダウン等）で保存されたら、統合管理を描き直す
+if(typeof saveToGAS==='function'&&!window._ckSaveWrapped){
+  window._ckSaveWrapped=true;const _o=saveToGAS;
+  saveToGAS=function(){const r=_o.apply(this,arguments);if(typeof currentPage!=='undefined'&&currentPage==='cockpit'){clearTimeout(window._ckR);window._ckR=setTimeout(renderCockpit,60);}return r;};
+}
+(function(){
+  const css=document.createElement('style');
+  css.textContent=`.ck-wrap{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:12px;align-items:start;}
+  .ck-list{max-height:calc(100vh - 230px);}
+  .ck-panel{background:#fff;border:1px solid var(--border-light);border-radius:10px;padding:12px;position:sticky;top:110px;max-height:calc(100vh - 130px);overflow:auto;}
+  .ck-head{padding-bottom:8px;border-bottom:2px solid #1e3a5f;margin-bottom:8px;}
+  .ck-sec{margin-top:10px;}
+  .ck-sec-h{display:flex;align-items:center;font-size:12px;font-weight:800;background:#eef2f7;padding:4px 8px;border-left:4px solid #1e3a5f;margin-bottom:4px;}
+  .ck-sec .pt{font-size:11px;}
+  tr.ck-sel td{background:#fff7d6!important;}
+  @media (max-width:1100px){.ck-wrap{grid-template-columns:1fr;}.ck-panel{position:static;max-height:none;}}`;
+  document.head.appendChild(css);
+})();
+</script>

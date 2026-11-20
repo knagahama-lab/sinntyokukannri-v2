@@ -810,6 +810,7 @@ function renderPage(page){
   else if(page==='csheets')renderConfigSheets();
   else if(page==='quotes')renderQuotes();
   else if(page==='gates')renderGates();
+  else if(page==='cockpit')renderCockpit();
   else if(page==='meetings')renderMeetings();
   else if(page==='schedule')renderSchedule();
   else if(page==='eco')renderEco();
@@ -885,6 +886,7 @@ function _init(saved){
   updateFutureBadge();
   applyTabSettings();
   renderDashboard();
+  if(typeof renderCockpit==='function'&&document.getElementById('page-cockpit')&&!(typeof _navPageInfo==='function'&&_navPageInfo('cockpit').hidden)){try{showPage('cockpit');}catch(e){}}
   window._appInitialized=true; // 初期化完了後は、以降の実行時エラーで画面全体を潰さないようにする
 }
 
